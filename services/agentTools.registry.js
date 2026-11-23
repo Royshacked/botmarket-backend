@@ -745,6 +745,15 @@ export const TOOL_SCHEMAS = {
             "sector": { "type": "string", "description": "A GICS sector (e.g. Information Technology) — every sub-industry in it. Used when no symbols are passed." }
         }
     },
+    // Prometheus's read of Pythia's case on a name's industry (services/tools/industryCase.tools.js — Roy, 2026-11-22).
+    get_industry_case: {
+        "type": "object",
+        "properties": {
+            "symbol":  { "type": "string", "description": "one ticker, e.g. NVDA" },
+            "horizon": { "type": "string", "enum": ["3m", "6m", "12m", "18m", "24m"], "description": "your price target's horizon — her stance on the book it is graded on" }
+        },
+        "required": ["symbol"]
+    },
     // Axl's read of today's hotlist (services/tools/hotlist.tools.js; Roy, 2026-10-22).
     // The monitors' view of ONE of the user's items (services/tools/itemStatus.tools.js — Roy, 2026-11-21).
     get_item_status: {

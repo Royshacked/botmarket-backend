@@ -50,6 +50,7 @@ const PLAN_FIELDS = ['sector', 'thesis', 'rating', 'price_target', 'estimates', 
 
 export const coverageService = {
     initiateCoverage,
+    queueRevision,
     getCoverage,
     getCoverageBySymbol,
     getCoverageById,
@@ -198,6 +199,22 @@ async function applySplit(id, split, { calls = null } = {}) {
 }
 
 // ─── monitor.* namespace ─────────────────────────────────────────────────────
+
+/**
+ * QUEUE A RE-MODEL from outside the monitor's own verdicts (2026-11-22: the industry strategist's stance on the name's book
+ * changed — services/industryVerdictCoverage). `monitor.pending_revision` is set (coverage.remodel REVISE_STATES reads
+ * it) and the next check brought forward to now, so the hourly loop picks it up. Only when nothing is waiting already —
+ * a queued target hit or split is answered by the same run, and keeps its own reason — and never on a retired name.
+ * → true when queued.
+ */
+async function queueRevision(id, { state, reason = null, at = new Date().toISOString() } = {}) {
+    const db = await getDb()
+    const res = await db.collection(COLLECTION).updateOne(
+        { id, status: { $ne: 'retired' }, 'monitor.pending_revision': { $in: [null] } },
+        { $set: { 'monitor.pending_revision': { state, reason, at }, 'monitor.next_check_at': at } },
+    )
+    return res.modifiedCount === 1
+}
 
 /** The monitor's bookkeeping under `monitor.*` — no revision. See houseArtifact.repo. */
 function recordMonitorState(id, opts) { return _repo.recordMonitorState(id, opts) }

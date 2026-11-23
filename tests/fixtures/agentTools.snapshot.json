@@ -1270,6 +1270,33 @@
             }
         },
         {
+            "name": "get_industry_case",
+            "description": "The INDUSTRY STRATEGIST's standing case on the GICS sub-industry a name is in — her near-term verdict (for swing / watch / avoid / no case) and her long-term call, her thesis and the evidence behind it, the risks she named, what would change her view, and the facts the house froze beside it: the industry basket's moves against SPY, its companies' capex and buybacks, insider buying. Pass `symbol`, and `horizon` (your target's: 3m … 24m) for her stance on the book that horizon is graded on — FOR, AGAINST or NEUTRAL. She judges INDUSTRIES, never a stock: whether this company is already priced for her case is yours to judge. Where your rating goes against her stance, say why in the thesis.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "symbol": {
+                        "type": "string",
+                        "description": "one ticker, e.g. NVDA"
+                    },
+                    "horizon": {
+                        "type": "string",
+                        "enum": [
+                            "3m",
+                            "6m",
+                            "12m",
+                            "18m",
+                            "24m"
+                        ],
+                        "description": "your price target's horizon — her stance on the book it is graded on"
+                    }
+                },
+                "required": [
+                    "symbol"
+                ]
+            }
+        },
+        {
             "name": "remember_about_user",
             "description": "Keep a LASTING fact about the user that they STATED, so every role knows it next time — \"I never trade low-float names\", \"I only trade the first hour\", \"I hold through earnings\", \"call me by my first name\". What you keep shows in ABOUT THE USER on every role's turns.\n- Only what THEY said about themselves, as a lasting rule or preference — never your read of them, never this trade's levels or size (the build keeps those), never a mood.\n- Never ask questions to fill it. Keep it the moment they say it, and say in a few words that you will remember.\n- They take one back (\"I do trade small caps now\") → call it with `forget: true` and the words of the old note.",
             "input_schema": {

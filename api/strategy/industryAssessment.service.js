@@ -104,11 +104,14 @@ const _io = {
     // Each symbol's GICS classification (industryData.readCompaniesBySymbol). Imported lazily: industryData imports
     // from this module, so a static import back would be a cycle.
     companies: async (symbols) => (await import('./industryData.service.js')).readCompaniesBySymbol(symbols),
+    // A changed verdict re-models the coverage it reaches (services/industryVerdictCoverage, 2026-11-22). Lazy for the
+    // same reason; never awaited by the publish, never failing it.
+    published: async (doc, changed) => (await import('../../services/industryVerdictCoverage.service.js')).onAssessmentPublished(doc, changed),
 }
 // The repo reads the same seam, so a test's fake database sees the revision write too.
 const _repo = makeHouseArtifactRepo({ collection: COLLECTION, getDb: () => _io.db() })
 /** Test seam. */
-export function _setAssessmentIO(io) { Object.assign(_io, io) }
+export function _setAssessmentIO(io) { Object.assign(_io, { published: null }, io) }  // a test tells no coverage of a changed verdict unless it passes its own `published`
 
 // Search citations are stored as their label (agentUtils.plainCitations — shared with the themes).
 const _str = (v, max = 900) => (typeof v === 'string' && v.trim() ? plainCitations(v.trim()).slice(0, max) : null)
@@ -484,6 +487,7 @@ async function publishAssessment(block, { sub = null, row = null, money = null, 
         { ...a, long_term: set.long_term?.call ?? prevLongTerm }, [...fields, 'long_term'])
     await _repo.revise(id, set, newRevision({ kind: cur?.verdict ? 'reassessment' : 'assessment', note: a.thesis, changed, at: now }))
     const doc = await db.collection(COLLECTION).findOne({ id }, { projection: { _id: 0 } })
+    if (changed && _io.published) Promise.resolve().then(() => _io.published(doc, changed)).catch(err => logger.warn(LOG, 'coverage not told of the change', { code: a.code, error: err.message }))
     let call = null
     if (recordCall) {
         try { call = await recordCall(doc, { now, basket }) }

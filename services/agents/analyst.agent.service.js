@@ -22,6 +22,7 @@ import { DESKS } from '../desks/registry.js'
 import { makeRouteCapture, buildRouteRule } from '../routing.util.js'
 import { VALUATION_TOOLS, VALUATION_TOOL_HANDLERS } from '../tools/valuation.tools.js'
 import { RUNUP_TOOLS, RUNUP_TOOL_HANDLERS } from '../tools/runup.tools.js'
+import { makeIndustryCaseHandlers, INDUSTRY_CASE_TOOL_SPEC } from '../tools/industryCase.tools.js'
 import { logger } from '../logger.service.js'
 import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
@@ -75,6 +76,9 @@ export const TOOLS = [
     }),
     // The catalyst read's run-up yardstick (runup.tools.js) — inserted ahead of consult, which stays last.
     ...RUNUP_TOOLS,
+    // Pythia's case on the name's industry (Roy, 2026-11-22) — every mode, a build, a re-model or an answer. Inserted
+    // ahead of remember_about_user and consult, which stay last.
+    ...toolsFor({ get_industry_case: INDUSTRY_CASE_TOOL_SPEC.get_industry_case }),
     ...toolsFor({
         // Appended too. The reasoning sidecar (services/deepThink.service.js): one bounded decision
         // put to a stronger model and handed back as a tool result. The mechanism half of this
@@ -91,6 +95,7 @@ export const TOOLS = [
 const TOOL_HANDLERS = {
     ...VALUATION_TOOL_HANDLERS,
     ...RUNUP_TOOL_HANDLERS,
+    ...makeIndustryCaseHandlers(),
     get_fundamentals:    makeToolHandler('get_fundamentals',    ({ ticker }) => getFundamentals(ticker),  (e, { ticker }) => `Could not fetch fundamentals for ${ticker}: ${e.message}`, LOG),
     get_sec_filings:     makeToolHandler('get_sec_filings',     ({ ticker }) => getSecFilings(ticker),    (e, { ticker }) => `Could not fetch SEC filings for ${ticker}: ${e.message}`, LOG),
     get_earnings:        makeToolHandler('get_earnings',        ({ ticker }) => getEarnings(ticker),      (e, { ticker }) => `Could not fetch earnings for ${ticker}: ${e.message}`, LOG),

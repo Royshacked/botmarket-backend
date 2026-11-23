@@ -20,6 +20,8 @@ import { getTickerAggregates } from '../providers/candles.provider.js'
 import { addMonths } from './forecastClock.js'
 import { ratingBand } from './ratingBands.js'
 import { closeOn } from './houseBook.service.js'
+import { sectorEtf } from './echoReturns.service.js'
+import { pythiaOnCall, agreement } from './pythiaStance.js'
 import { COLLECTION as READS } from './catalystRead.service.js'
 import { logger } from './logger.service.js'
 
@@ -40,7 +42,7 @@ const DIRECTION = { strong_buy: 1, buy: 1, hold: 0, sell: -1, strong_sell: -1 }
 const _etDay = (ms) => new Date(ms).toLocaleDateString('en-CA', { timeZone: 'America/New_York' })
 const _barDay = (b) => _etDay(b.timestamp > 1e12 ? b.timestamp : b.timestamp * 1000)
 const _ok = (v) => typeof v === 'number' && Number.isFinite(v) && v > 0
-const _r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 : null)
+const _r2 = (v) => (Number.isFinite(v) ? Math.round(v * 100) / 100 || 0 : null)   // || 0: never a -0
 const _num = (v) => (v == null || v === '' ? null : Number.isFinite(Number(v)) ? Number(v) : null)
 
 const _deps = {
@@ -48,6 +50,15 @@ const _deps = {
     bars: (s, from, to) => getTickerAggregates(s, { timeSpan: 'day', multiplier: 1, from, to }).catch(() => null),
     now:  () => Date.now(),
     sleep: (ms) => new Promise(r => setTimeout(r, ms)),
+    // Pythia's stance on the call's book the moment it is made (pythiaStance) — the name's GICS row and her assessment of
+    // its sub-industry. Imported lazily: the strategy services sit above this ledger.
+    pythia: async (symbol, horizon, at) => {
+        const { readCompaniesBySymbol } = await import('../api/strategy/industryData.service.js')
+        const { industryAssessmentService } = await import('../api/strategy/industryAssessment.service.js')
+        const company = (await readCompaniesBySymbol([symbol]))[String(symbol).toUpperCase()] ?? null
+        const doc = company?.sub_code ? await industryAssessmentService.getAssessment(company.sub_code) : null
+        return pythiaOnCall({ company, doc, horizon, at })
+    },
 }
 /** Test seam. */
 export function _setDeps(d) { Object.assign(_deps, d) }
@@ -65,7 +76,7 @@ export function isNewCall(prev, next) {
 }
 
 /** A coverage document → the frozen call row. Pure. `madeAt` — when the call was made (a backfill: its target's set_at). */
-export function callFromCoverage(cov, { madeAt, source = 'forward' } = {}) {
+export function callFromCoverage(cov, { madeAt, source = 'forward', pythia = null } = {}) {
     const horizon = cov?.price_target?.horizon ?? '12m'
     return {
         id: `pc_${cov.symbol}_${randomUUID().slice(0, 8)}`,
@@ -82,6 +93,9 @@ export function callFromCoverage(cov, { madeAt, source = 'forward' } = {}) {
         // conviction that may cap it. Absent on calls before it — those are read on the flat margin.
         sigma_pct: _num(cov.price_target?.sigma_pct),
         conviction: cov.conviction?.level ?? null,
+        // Pythia's stance on the call's book that day (pythiaStance.pythiaOnCall, 2026-11-22) — null when it could not be
+        // read; the scorecard splits the calls with her from the calls against her.
+        pythia,
         entry: null,
         marks: {},
         target_reached: null,
@@ -163,8 +177,13 @@ function _firstFrom(bars, day) {
  * What a grading pass adds to a call → `{ entry, marks, target_reached, done }` (the call's own values carried over),
  * from its daily bars and SPY's (ascending) and today's ET date. Pure. A mark is graded once its day is past and the bars
  * reach it; one still unpriced GIVE_UP_DAYS after its day is closed `unpriced`. `done` once every mark is in.
+ *
+ * THE SECTOR (Roy, 2026-11-22 — Wall Street judges a rating against the stock's own sector, not the market): with the
+ * call's sector fund's bars (`sectorBars`, its SPDR — echoReturns.sectorEtf), the entry keeps the fund's close
+ * (`entry.sector`) and each mark its return beside SPY's: `vs_sector`, `signed_sector`. A call graded before it gets
+ * them on its next pass — the marks it already has are filled from the fund's closes on their own days.
  */
-export function gradeCall(call, bars, spyBars, today) {
+export function gradeCall(call, bars, spyBars, today, sectorBars = null) {
     const out = { entry: call.entry, marks: { ...call.marks }, target_reached: call.target_reached }
     if (!out.entry) {
         const day = entryDay(call.made_at)
@@ -193,8 +212,35 @@ export function gradeCall(call, bars, spyBars, today) {
             if (call.direction > 0 ? Number(b.high) >= call.pt : Number(b.low) > 0 && Number(b.low) <= call.pt) { out.target_reached = { day: d }; break }
         }
     }
+    Object.assign(out, sectorFill({ ...call, entry: out.entry, marks: out.marks }, sectorBars))
     out.done = marksFor(call.horizon).every(m => out.marks[m])
     return out
+}
+
+/**
+ * A call's SECTOR yardstick filled in from its fund's daily bars → `{ entry, marks }`: the entry keeps the fund's close on
+ * the entry day (`entry.sector: { etf, price }`), and every priced mark without one gets `sector_return_pct`,
+ * `vs_sector` and `signed_sector` from the fund's close on the mark's day. Nothing else changes — no mark is added or
+ * closed, so the backfill can run it on calls graded before it. Pure.
+ */
+export function sectorFill(call, sectorBars) {
+    let entry = call.entry ?? null
+    const marks = { ...(call.marks ?? {}) }
+    const etf = sectorEtf(call.sector)
+    if (!entry || !etf || !sectorBars?.length) return { entry, marks }
+    if (!_ok(entry.sector?.price)) {
+        const px = closeOn(sectorBars, entry.day)
+        if (!_ok(px)) return { entry, marks }
+        entry = { ...entry, sector: { etf, price: px } }
+    }
+    for (const [m, mark] of Object.entries(marks)) {
+        if (mark?.vs_sector != null || !Number.isFinite(mark?.return_pct)) continue
+        const px = closeOn(sectorBars, mark.day)
+        if (!_ok(px)) continue
+        const sr = (px / entry.sector.price - 1) * 100
+        marks[m] = { ...mark, sector_return_pct: _r2(sr), vs_sector: _r2(mark.return_pct - sr), signed_sector: call.direction ? _r2((mark.return_pct - sr) * call.direction) : null }
+    }
+    return { entry, marks }
 }
 
 const _mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
@@ -216,44 +262,93 @@ export function callBand(call) {
     return ratingBand({ target: call?.pt, price: call?.entry?.price, horizon: call?.horizon, sigma_pct: call?.sigma_pct ?? null, conviction: call?.conviction ?? null })?.rating ?? null
 }
 
+/** The two yardsticks a mark is read on: SPY (the default) and the call's own sector fund (2026-11-22). */
+export const BENCHES = Object.freeze({
+    spy:    Object.freeze({ raw: 'vs_spy',    signed: 'signed' }),
+    sector: Object.freeze({ raw: 'vs_sector', signed: 'signed_sector' }),
+})
+const MARK_KEYS = MARKS.map(x => `${x}m`)
+
+/** Each mark's summary of `pick(call, mark)` over `rows` → `{ '1m': summary, … }`, marks with none left out. Pure. */
+const _byMark = (rows, pick) => Object.fromEntries(MARK_KEYS.map(m => [m, summarise(rows.map(c => pick(c, m)).filter(Number.isFinite))]).filter(([, s]) => s.n))
+
 /**
  * The calls by their band at the call → `{ band: { '1m': summary, … } }`, each mark signed by the BAND's direction (a
- * hold's raw vs SPY). How his calls did under the house's ratings, the bands' order. Pure.
+ * hold's raw vs the yardstick). How his calls did under the house's ratings, the bands' order. Pure.
  */
-export function byBand(rows) {
+export function byBand(rows, bench = BENCHES.spy) {
     const out = {}
     for (const band of Object.keys(DIRECTION)) {
         const rs = rows.filter(c => callBand(c) === band)
         if (!rs.length) continue
         const dir = DIRECTION[band]
-        const marks = Object.fromEntries(MARKS.map(x => `${x}m`).map(m => [m, summarise(rs.map(c => {
-            const v = c.marks?.[m]?.vs_spy
-            return Number.isFinite(v) ? (dir ? _r2(v * dir) : v) : null
-        }).filter(Number.isFinite))]).filter(([, s]) => s.n))
-        out[band] = marks
+        out[band] = _byMark(rs, (c, m) => { const v = c.marks?.[m]?.[bench.raw]; return Number.isFinite(v) ? (dir ? _r2(v * dir) : v) : null })
     }
     return out
 }
 
 /**
+ * BUYS MINUS SELLS (Roy, 2026-11-22 — the long–short spread Wall Street reads a rating book by): per mark, the mean of
+ * the buy-side calls less the mean of the sell-side, each on its raw return vs the yardstick — in a market that fell,
+ * the picking shows here even when every call lost to SPY. `dirOf` — a call's side (+1 / −1 / 0): its rating, or its
+ * band. → `{ '1m': { n, buys, sells, mean, buy_mean, sell_mean, judge } }`; `mean` null without both sides. Pure.
+ */
+export function spreadOf(rows, dirOf, bench = BENCHES.spy) {
+    const out = {}
+    for (const m of MARK_KEYS) {
+        const side = (d) => rows.filter(c => dirOf(c) === d).map(c => c.marks?.[m]?.[bench.raw]).filter(Number.isFinite)
+        const b = side(1), s = side(-1)
+        if (!b.length && !s.length) continue
+        const bm = _mean(b), sm = _mean(s)
+        out[m] = { n: b.length + s.length, buys: b.length, sells: s.length, buy_mean: _r2(bm), sell_mean: _r2(sm),
+            mean: b.length && s.length ? _r2(bm - sm) : null, judge: b.length >= MIN_JUDGE && s.length >= MIN_JUDGE }
+    }
+    return out
+}
+
+/**
+ * WITH PYTHIA OR AGAINST HER (Roy, 2026-11-22): the directional calls by her stance on their book the day they were made
+ * (`call.pythia`, pythiaStance) — `with` (a buy where she was for, a sell where she was against), `against`, `neutral`
+ * (she had a view, neither way), `unread` (no stance: not classified, not assessed then, or not read). Signed. Pure.
+ */
+export function byPythia(rows, bench = BENCHES.spy) {
+    const dirRows = rows.filter(c => c.direction)
+    const groups = { with: [], against: [], neutral: [], unread: [] }
+    for (const c of dirRows) groups[agreement(c.direction, c.pythia?.stance ?? null) ?? 'unread'].push(c)
+    return Object.fromEntries(Object.entries(groups).filter(([, rs]) => rs.length)
+        .map(([k, rs]) => [k, { calls: rs.length, marks: _byMark(rs, (c, m) => c.marks?.[m]?.[bench.signed]) }]))
+}
+
+/**
  * The coverage calls' record → per `source` (forward / backfill): every mark's summary of `signed` over the directional
- * calls, the holds' raw `vs_spy` apart, by rating, and the targets reached among calls past their horizon. Pure.
+ * calls, the holds' raw `vs_spy` apart, by rating, by band, the buys-minus-sells spread (by rating and by band), the
+ * calls with / against Pythia, and the targets reached among calls past their horizon — and all of it again against
+ * each call's SECTOR fund (`sector`, the same shape without the counts). Pure.
  */
 export function coverageRecord(calls) {
-    const group = (rows) => {
+    const read = (rows, bench) => {
         const marks = {}
-        for (const m of MARKS.map(x => `${x}m`)) {
-            const dir = rows.map(c => c.marks?.[m]?.signed).filter(Number.isFinite)
-            const holds = rows.filter(c => !c.direction).map(c => c.marks?.[m]?.vs_spy).filter(Number.isFinite)
+        for (const m of MARK_KEYS) {
+            const dir = rows.map(c => c.marks?.[m]?.[bench.signed]).filter(Number.isFinite)
+            const holds = rows.filter(c => !c.direction).map(c => c.marks?.[m]?.[bench.raw]).filter(Number.isFinite)
             if (dir.length || holds.length) marks[m] = { calls: summarise(dir), holds: summarise(holds) }
         }
+        return {
+            marks,
+            by_rating: Object.fromEntries(Object.keys(DIRECTION).map(r => [r, rows.filter(c => c.rating === r)]).filter(([, rs]) => rs.length)
+                .map(([r, rs]) => [r, _byMark(rs, (c, m) => c.marks?.[m]?.[DIRECTION[r] ? bench.signed : bench.raw])])),
+            by_band: byBand(rows, bench),
+            spread: { by_rating: spreadOf(rows, c => c.direction ?? 0, bench), by_band: spreadOf(rows, c => DIRECTION[callBand(c)] ?? 0, bench) },
+            by_pythia: byPythia(rows, bench),
+        }
+    }
+    const group = (rows) => {
         const past = rows.filter(c => c.direction && c.done)
         return {
-            calls: rows.length, open: rows.filter(c => !c.done).length, marks,
+            calls: rows.length, open: rows.filter(c => !c.done).length,
+            ...read(rows, BENCHES.spy),
             target: { settled: past.length, reached: past.filter(c => c.target_reached).length },
-            by_rating: Object.fromEntries(Object.keys(DIRECTION).map(r => [r, rows.filter(c => c.rating === r)]).filter(([, rs]) => rs.length)
-                .map(([r, rs]) => [r, Object.fromEntries(MARKS.map(x => `${x}m`).map(m => [m, summarise(rs.map(c => c.marks?.[m]?.[DIRECTION[r] ? 'signed' : 'vs_spy']).filter(Number.isFinite))]).filter(([, s]) => s.n))])),
-            by_band: byBand(rows),
+            sector: { graded: rows.filter(c => MARK_KEYS.some(m => Number.isFinite(c.marks?.[m]?.vs_sector))).length, ...read(rows, BENCHES.sector) },
         }
     }
     return { forward: group(calls.filter(c => c.source === 'forward')), backfill: group(calls.filter(c => c.source === 'backfill')) }
@@ -309,7 +404,13 @@ async function recordCoverageCall(cov, { prev = null, source = 'forward', at = n
         const coll = await _coll(deps)
         await _ensureIndexes(coll)
         const madeAt = at ?? new Date(deps.now()).toISOString()
-        const row = callFromCoverage(cov, { madeAt, source })
+        const horizon = cov?.price_target?.horizon ?? '12m'
+        // A failed read logs the call without it — the record must never wait on the industry desk.
+        const pythia = deps.pythia ? await deps.pythia(cov.symbol, horizon, madeAt).catch(err => {
+            logger.warn(LOG, 'Pythia not read for the call', { symbol: cov?.symbol, error: err.message })
+            return null
+        }) : null
+        const row = callFromCoverage(cov, { madeAt, source, pythia })
         await coll.insertOne({ ...row, done: false })
         // Only an OLDER open call is superseded — a re-run backfill (the insert above throws on a logged call) never
         // reaches here, and a call logged out of order never closes a newer one.
@@ -334,11 +435,18 @@ async function gradeDue(deps = _deps) {
         const from = Math.min(...due.map(c => Date.parse(c.made_at))) - 7 * DAY_MS
         const spyBars = await deps.bars('SPY', from, nowMs)
         if (!spyBars?.length) { logger.warn(LOG, 'no SPY bars — grading put off'); return out }
+        // Each sector fund read once a pass (eleven at most). A failed one grades vs SPY alone; the next pass fills it.
+        const funds = new Map()
+        const fundBars = async (etf) => {
+            if (!etf) return null
+            if (!funds.has(etf)) funds.set(etf, await deps.bars(etf, from, nowMs))
+            return funds.get(etf)
+        }
         for (const c of due) {
             try {
                 await deps.sleep?.(PACE_MS)
                 const bars = await deps.bars(c.symbol, Date.parse(c.made_at) - 7 * DAY_MS, nowMs)
-                const g = gradeCall(c, bars ?? [], spyBars, today)
+                const g = gradeCall(c, bars ?? [], spyBars, today, await fundBars(sectorEtf(c.sector)))
                 if (JSON.stringify([g.entry, g.marks, g.target_reached, g.done]) === JSON.stringify([c.entry, c.marks, c.target_reached, Boolean(c.done)])) continue
                 await coll.updateOne({ id: c.id }, { $set: { entry: g.entry, marks: g.marks, target_reached: g.target_reached, done: g.done, graded_at: new Date(nowMs).toISOString() } })
                 out.graded++
@@ -358,7 +466,10 @@ async function gradeDue(deps = _deps) {
 async function scorecard(deps = _deps) {
     const db = await deps.db()
     const [calls, reads] = await Promise.all([
-        db.collection(COLLECTION).find({}, { projection: { _id: 0, symbol: 1, source: 1, rating: 1, direction: 1, marks: 1, done: 1, target_reached: 1, pt: 1, entry: 1, horizon: 1 } }).toArray(),
+        // sigma_pct + conviction: the band at the call reads them (callBand) — left out of this projection until 2026-11-22,
+        // the band column read every call on the flat margin.
+        db.collection(COLLECTION).find({}, { projection: { _id: 0, symbol: 1, source: 1, rating: 1, direction: 1, marks: 1, done: 1, target_reached: 1, pt: 1, entry: 1, horizon: 1,
+            sigma_pct: 1, conviction: 1, 'pythia.stance': 1 } }).toArray(),
         db.collection(READS).find({}, { projection: { _id: 0, status: 1, pass_reason: 1, window_mark: 1, 'through_report.call': 1 } }).toArray(),
     ])
     return { coverage: coverageRecord(calls), catalyst: catalystRecord(reads), as_of: new Date(deps.now()).toISOString(), min_judge: MIN_JUDGE }

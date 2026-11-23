@@ -132,3 +132,51 @@ test('by the house bands: each call in the band its target fell in THE DAY IT WA
     assert.equal(b.strong_sell['1m'].mean, 4, 'a sell that lagged scores +')
     assert.deepEqual(coverageRecord([{ ...call(130, 100, 3), source: 'forward', direction: 0 }]).forward.by_band.strong_buy['1m'].n, 1)
 })
+
+// Roy, 2026-11-22 ("in Wall Street how do they check if an analyst was right" → do both): the sector fund as a second
+// yardstick, and the buy-minus-sell spread.
+test('the sector yardstick: the entry keeps its fund’s close, every mark its return beside SPY’s; old marks filled in', async () => {
+    const { sectorFill } = await import('../../services/prometheusCalls.service.js')
+    const call = { ...callFromCoverage(cov('buy', 115, '3m', { sector: 'Technology' }), { madeAt: '2026-01-05T15:00:00.000Z' }), marks: {} }
+    const own = bars('2026-01-05', 80, k => 100 + k * 0.25)
+    const spy = bars('2026-01-05', 80, () => 400)
+    const xlk = bars('2026-01-05', 80, k => 200 + k * 0.5)           // the fund rose as fast as the stock
+    const g = gradeCall(call, own, spy, '2026-04-30', xlk)
+    assert.deepEqual(g.entry.sector, { etf: 'XLK', price: 200 })
+    assert.ok(g.marks['1m'].vs_spy > 0, 'beat SPY…')
+    assert.equal(g.marks['1m'].vs_sector, 0, '…but only as much as its sector')
+    assert.equal(g.marks['1m'].signed_sector, 0)
+    // Graded before the yardstick: the fill adds it, and adds or closes no mark.
+    const before = gradeCall(call, own, spy, '2026-04-30')
+    assert.equal(before.entry.sector, undefined)
+    const f = sectorFill({ ...call, entry: before.entry, marks: { '1m': before.marks['1m'] } }, xlk)
+    assert.equal(f.entry.sector.etf, 'XLK')
+    assert.deepEqual(Object.keys(f.marks), ['1m'])
+    assert.equal(f.marks['1m'].vs_sector, 0)
+    assert.deepEqual(sectorFill({ ...call, sector: 'Nowhere', entry: before.entry }, xlk).entry, before.entry, 'no fund: unchanged')
+})
+
+test('buys minus sells: each side’s raw mean vs the yardstick, the spread only with both sides', async () => {
+    const { spreadOf } = await import('../../services/prometheusCalls.service.js')
+    const c = (direction, vs) => ({ direction, marks: { '1m': { vs_spy: vs } } })
+    const s = spreadOf([c(1, -2), c(1, -4), c(-1, -8), c(0, 5)], r => r.direction)
+    assert.deepEqual(s['1m'], { n: 3, buys: 2, sells: 1, buy_mean: -3, sell_mean: -8, mean: 5, judge: false },
+        'every call lost to SPY, and the buys still beat the sells by 5 points')
+    assert.equal(spreadOf([c(1, 2)], r => r.direction)['1m'].mean, null, 'no sells: no spread')
+})
+
+test('with Pythia or against her, and the record carries the sector read, the spread and the split', async () => {
+    const { byPythia } = await import('../../services/prometheusCalls.service.js')
+    const c = (direction, stance, signed) => ({ source: 'forward', direction, rating: direction > 0 ? 'buy' : 'sell', pythia: stance ? { stance } : null,
+        marks: { '1m': { vs_spy: signed * direction, signed, vs_sector: signed * direction, signed_sector: signed } } })
+    const rows = [c(1, 'for', 3), c(-1, 'against', 2), c(1, 'against', -5), c(1, 'neutral', 1), c(-1, null, 4)]
+    const p = byPythia(rows)
+    assert.deepEqual(Object.keys(p), ['with', 'against', 'neutral', 'unread'])
+    assert.deepEqual([p.with.calls, p.with.marks['1m'].mean], [2, 2.5])
+    assert.equal(p.against.marks['1m'].mean, -5)
+    const r = coverageRecord(rows).forward
+    assert.equal(r.sector.graded, 5)
+    assert.equal(r.sector.marks['1m'].calls.n, 5)
+    assert.ok(r.spread.by_rating['1m'] && r.by_pythia.with)
+    assert.equal(callFromCoverage(cov('buy', 100), { madeAt: 'x', pythia: { stance: 'for' } }).pythia.stance, 'for')
+})

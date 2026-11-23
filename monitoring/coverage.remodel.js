@@ -58,7 +58,9 @@ export const FLOOR_DAYS    = 90   // ...but never leave one un-modelled longer t
 // us asks for nothing.
 // 'split' (2026-11-22) is not a gap verdict: the monitor stores it when it restates a split (coverage.service applySplit)
 // — the numbers are restated, the thesis prose still speaks pre-split, and the re-model rewrites it.
-export const REVISE_STATES = new Set(['target_hit', 'target_hit_early', 'diverging', 'split'])
+// 'industry_verdict' (2026-11-22) is not a gap verdict either: the industry strategist's stance on the name's book changed
+// (services/industryVerdictCoverage, coverage.service queueRevision) — the re-model reads her new case (get_industry_case).
+export const REVISE_STATES = new Set(['target_hit', 'target_hit_early', 'diverging', 'split', 'industry_verdict'])
 // A verdict outranks the 14-day cooldown — a thesis that needs revising must not wait two weeks in
 // silence now that no card says so — but not a run that has just landed: the verdict waits this long
 // (kept as `monitor.pending_revision`, so it is not lost) rather than buying the same research twice.
@@ -68,6 +70,7 @@ const VERDICT_WHY = {
     target_hit_early: 'target reached early — the model was too conservative',
     diverging:        'the Street is moving away from our target',
     split:            'the stock split — the house restated every per-share number; restate the thesis in post-split terms',
+    industry_verdict: 'the industry strategist changed her stance on the industry for this book — read her new case (get_industry_case) and say whether the thesis still stands',
 }
 
 /**
