@@ -1278,6 +1278,16 @@ services/
   situation/propagate.js    the update engine, pure: reach / marginal / pathProbability / treePaths (givens = trees),
                             resolve, anchorFor, propagate (a link shifts log-odds by how far its source MOVED since the
                             target's anchor; until < 1 point or 10 rounds), split (partial resolutions).
+  situation/exposure.js     each industry_index basket's evidence (buildExposures): weekly beta to the S&P (FMP ^GSPC), and
+                            on the residual the 10-year / Brent / dollar slopes with t; reactions vs all industries to the
+                            DAILY_EVENTS (declared in the plan) and the monthly `industry_reactions` (aether
+                            seed_industry_reactions.py, 2007–2025, survivors only); exposureLine for the prompt.
+  situation/industries.js   mapBranches (one Opus call, prompts/situation_industries.md: branch → ≤ 8 industries, up/down
+                            + bucket, grounded in exposureLine), scoreIndustries (5000 seeded samples of the network —
+                            givens gate children, links make a sample a coherent path → p_win, p_lose, bucket, agreement,
+                            the branches behind it), wouldBeEntries (30/50/70% crossings; the record only, no trades).
+  situation/build.js        buildFull: state → network → exposures → mapping → scores → saveRun (kind build | rebuild),
+                            effects kept on each option, cost by stage, gaps, entries. First live: $1.86 all in.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

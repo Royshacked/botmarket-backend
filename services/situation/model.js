@@ -110,7 +110,12 @@ export function checkNode(input = {}) {
         if (!KEY.test(String(o?.key ?? ''))) return bad(`"${question.slice(0, 40)}": option key must be lower_snake (a–z, 0–9, _)`)
         if (!text(o.label, 160)) return bad(`"${question.slice(0, 40)}": option ${o.key} needs a label`)
         if (!isProb(o.p)) return bad(`"${question.slice(0, 40)}": option ${o.key} needs p between 0 and 1`)
-        options.push({ key: o.key, label: text(o.label, 160), p: o.p, signpost: text(o.signpost, 240) || null })
+        // A branch's industry effects (industries.js mapBranches), kept on the branch so an update re-scores without
+        // mapping again: [{ code, direction up|down, bucket, why }].
+        const effects = (Array.isArray(o.effects) ? o.effects : [])
+            .filter(e => e && e.code && ['up', 'down'].includes(e.direction) && BUCKETS.includes(e.bucket))
+            .slice(0, 8).map(e => ({ code: String(e.code), direction: e.direction, bucket: e.bucket, why: text(e.why, 300) || null }))
+        options.push({ key: o.key, label: text(o.label, 160), p: o.p, signpost: text(o.signpost, 240) || null, effects })
     }
     if (new Set(options.map(o => o.key)).size !== options.length) return bad(`"${question.slice(0, 40)}": option keys must be distinct`)
     const sum = options.reduce((s, o) => s + o.p, 0)
@@ -232,6 +237,7 @@ export function checkIndustry(input = {}) {
     return ok({
         level: text(input.level, 20) || 'sub_industry', code, name, p_win, p_lose,
         bucket: input.bucket ?? null, agreement: input.agreement ?? null,
+        expected: typeof input.expected === 'number' && Number.isFinite(input.expected) ? input.expected : null,
         paths: Array.isArray(input.paths) ? input.paths.slice(0, 50) : [],
         early_warning: input.early_warning ?? null,
     })

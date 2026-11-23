@@ -84,6 +84,22 @@ renormalised. Log-odds keeps every number between 0 and 100% however many links 
   spikes, rate shocks, 2022 invasion; the list declared before the run). Into `industry_reactions`.
 - **LLM:** each branch → industries, direction + size bucket, with why, citing the exposure and reaction rows.
 
+**Built (2026-11-23), and the event list DECLARED before any reaction was computed:**
+- Sensitivities are computed in Node, each build, from data Render has: each `industry_index` basket's weekly
+  returns over its ~2 years against the S&P (FMP `^GSPC`), and, on what is left after the market, against the weekly
+  change in the 10-year (FRED DGS10, per +1 point), Brent (DCOILBRENTEU, per +1%) and the broad dollar (DTWEXBGS,
+  per +1%), each with its t-statistic. No `industry_exposures` collection: nothing to keep in step.
+- Past reactions, each industry against the average of all industries (so a day that lifts everything lifts nothing):
+  - **Daily, from `industry_index` (2024-08 on), day 0 and days 0–5:** 2024-11-06 US election · 2025-01-27 DeepSeek ·
+    2025-02-03 tariffs on Canada, Mexico, China announced · 2025-04-03 "Liberation Day" tariffs · 2025-04-09 the
+    90-day pause · 2025-05-12 the US–China Geneva truce · 2025-06-13 Israel strikes Iran · 2025-06-23 US strikes Iran.
+  - **Monthly, from the GICS industry returns 2007–2025 (aether `industry_returns_monthly.parquet`, seeded once by
+    `aether-engine/scripts/seed_industry_reactions.py` into `industry_reactions`):** 2008-09 Lehman · 2014-11 OPEC
+    holds output, oil collapses · 2016-11 US election · 2018-03 steel and aluminium tariffs · 2018-07 first China
+    tariffs · 2019-05 tariff escalation · 2020-03 COVID crash · 2022-03 Russia invades Ukraine · 2022-06 the 75bp
+    hike and CPI 9.1% · 2023-03 SVB.
+- Not available: import share, and foreign / China revenue (per-company FMP segments; not wired). Said in the prompt.
+
 ## 8. Industry scores
 
 Sum over all live paths: chance it wins, chance it loses, expected bucket, agreement. **Early warnings:** a woken branch gets one LLM call ("if true, how large, which industries?"); its effects sit beside the summed scores, never inside, and are logged and scored on their own. Log the would-be
