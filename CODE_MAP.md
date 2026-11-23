@@ -1250,6 +1250,15 @@ services/
                             watches and grades. monitoring/echoPipeline.monitor (hourly; intake every 3 h; ECHO_PIPELINE).
   echo.service.js           ECHO, READ: the pipeline's events shaped for the Hotlist and the desk — links ranked (flags,
                             then score) with factors, evidence, check and grades; the validation report.
+  ── THE SITUATION NETWORK (docs/design/situation-network.md + -plan.md, 2026-11-23; being built, industries only) ──
+  situation/access.js       canSeeSituation — the ONE gate (route, Axl tool, board): the SITUATION_USERS allow-list, not
+                            the admin role (Roy + Marce). SITUATION_NETWORK opt-in.
+  situation/model.js        the records, pure: checkState (six dated, sourced, fact/reading sections), checkNode (2–4
+                            options summing to 1; open/settled DERIVED at 0.8; dormant branches need a signpost; resolved
+                            needs evidence; the review baseline for the drift rule), checkLink (branch → option, log-odds
+                            shift ≤ 3), checkDropped (counts add up), checkIndustry, checkForecast, checkOutside, checkRun.
+  situation/store.js        `situation_*` collections (runs, states, nodes, links, dropped, industries, forecasts, outside):
+                            saveRun writes a run whole then marks it complete; latestRun / readRun read complete runs only.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
