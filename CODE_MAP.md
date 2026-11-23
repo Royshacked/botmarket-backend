@@ -1288,6 +1288,19 @@ services/
                             the branches behind it), wouldBeEntries (30/50/70% crossings; the record only, no trades).
   situation/build.js        buildFull: state → network → exposures → mapping → scores → saveRun (kind build | rebuild),
                             effects kept on each option, cost by stage, gaps, entries. First live: $1.86 all in.
+  situation/update.js       runUpdate (weekly | event | rebuild with `fresh` state + candidate questions): ONE Opus call
+                            (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
+                            new_question / resolves / outside / none), signposts fired, due questions → applyAnswer, new
+                            branches mapped, overCap (20 open), re-anchor + propagate, re-score, early warnings (woken
+                            branches, beside the scores), reviewItems (moved > 10 / drift since review / new / woken /
+                            resolved; silence = accept resets the baseline), forecasts graded on resolution. Live: $0.16.
+  situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d) → else the 3-hourly
+                            watch: Federal Register + FMP news → one Sonnet triage → an EVENT update at most once a day,
+                            inside SITUATION_WEEKLY_USD (default $10). After each run, Roy's card.
+  situation/review.js       cardLines / postReviewCard (to Roy only, botId axl, type situation_review; the first build
+                            lists every open node) and overrideNode (Roy's numbers → a new run: re-anchored, spread,
+                            re-scored, both numbers logged as forecasts).
+  (monitoring/situationNetwork.monitor.service.js — hourly, eager; SITUATION_NETWORK opt-in.)
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

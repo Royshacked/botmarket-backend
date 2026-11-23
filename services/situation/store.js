@@ -148,3 +148,34 @@ export async function readRun(run_id, deps = _deps) {
     ])
     return { run, state, nodes, links, dropped, industries, outside }
 }
+
+/**
+ * Grade every logged forecast of a node once it resolved (§9): outcome 1 for the option that happened, 0 for the rest,
+ * and its Brier term (p − outcome)². Only forecasts not graded yet. → the number graded.
+ */
+export async function gradeForecasts(node_id, option, on, deps = _deps) {
+    if (!node_id || !option) return 0
+    const db = await deps.db()
+    const coll = db.collection(COLLECTIONS.forecasts)
+    const open = await coll.find({ node_id, outcome: null }, { projection: { _id: 0, forecast_id: 1, option: 1, p: 1 } }).toArray()
+    for (const f of open) {
+        const outcome = f.option === option ? 1 : 0
+        await coll.updateOne({ forecast_id: f.forecast_id, outcome: null }, { $set: { outcome, resolved_on: on, brier: (f.p - outcome) ** 2 } })
+    }
+    return open.length
+}
+
+/** Set fields on one node of one run (Roy's override from the board or the card). → true when it matched. */
+export async function updateNode(run_id, node_id, set, deps = _deps) {
+    const db = await deps.db()
+    const r = await db.collection(COLLECTIONS.nodes).updateOne({ run_id, node_id }, { $set: set })
+    return r.matchedCount > 0
+}
+
+/** Insert forecasts outside a run's save (an override's numbers). */
+export async function addForecasts(rows, run_id, deps = _deps) {
+    if (!rows?.length) return 0
+    const db = await deps.db()
+    await db.collection(COLLECTIONS.forecasts).insertMany(rows.map(r => ({ ...r, run_id })))
+    return rows.length
+}

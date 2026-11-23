@@ -75,7 +75,8 @@ test('server.js registers the full fleet', () => {
         // opt-in, ECHO_PIPELINE=true.
         'coverage', 'dailyScreener', 'echoPipeline', 'echoReads', 'entries', 'exits', 'guardSweep', 'industryView', 'marketBrief', 'marketOpen', 'paperEquity',
         // 'splitSweep' (2026-11-22) restates open trades through a stock split (tradeSplit.service).
-        'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'splitSweep', 'talos', 'themis',
+        // 'situationNetwork' (2026-11-23) builds and updates the situation network (situation-network.md); opt-in, SITUATION_NETWORK.
+        'paperFill', 'paperMark', 'prometheusScorecard', 'pythiaCalls', 'pythiaWeekly', 'reconciler', 'situationNetwork', 'splitSweep', 'talos', 'themis',
     ])
 })
 

@@ -168,8 +168,12 @@ export function checkNode(input = {}) {
         if (typeof a.p !== 'object' || a.p === null || typeof a.src !== 'object' || a.src === null) return bad(`"${question.slice(0, 40)}": anchor is { p, src }`)
         anchor = { p: { ...a.p }, src: { ...a.src }, on: a.on ?? null }
     }
+    const impact = ['low', 'medium', 'high'].includes(input.impact) ? input.impact : null
+    // Dormant branches whose signposts fired (§11.9): [{ option, on, evidence }] — the early warnings' source.
+    const woken = (Array.isArray(input.woken) ? input.woken : []).filter(w => options.some(o => o.key === w?.option))
+        .map(w => ({ option: w.option, on: realDate(w.on) ? w.on : null, evidence: text(w.evidence, 400) || null }))
     return ok({
-        given, anchor,
+        given, anchor, impact, woken,
         review,
         node_id: input.node_id ?? newId('node'), tree, question, kind, status, options,
         lag: lag.value, resolve_by: input.resolve_by ?? null, resolved,
@@ -220,9 +224,10 @@ export function checkDropped(input = {}) {
         })
     }
     const { considered, open, settled } = input
-    if (![considered, open, settled].every(n => Number.isInteger(n) && n >= 0)) return bad('considered, open and settled are counts')
-    if (considered !== open + settled + dropped.length) return bad(`counts do not add up: ${considered} considered ≠ ${open} open + ${settled} settled + ${dropped.length} dropped`)
-    return ok({ considered, open, settled, dropped })
+    const resolved = input.resolved ?? 0   // questions that have been answered (they leave open/settled, and stay counted)
+    if (![considered, open, settled, resolved].every(n => Number.isInteger(n) && n >= 0)) return bad('considered, open, settled and resolved are counts')
+    if (considered !== open + settled + resolved + dropped.length) return bad(`counts do not add up: ${considered} considered ≠ ${open} open + ${settled} settled + ${resolved} resolved + ${dropped.length} dropped`)
+    return ok({ considered, open, settled, resolved, dropped })
 }
 
 /** An industry's score for one run (§6). Chances in [0, 1], win + lose ≤ 1 (the rest is "no clear effect"). */

@@ -94,6 +94,7 @@ import { pythiaCallsMonitorService } from './monitoring/pythiaCalls.monitor.serv
 import { prometheusScorecardMonitorService } from './monitoring/prometheusScorecard.monitor.service.js'
 import { echoReadsMonitorService } from './monitoring/echoReads.monitor.service.js'
 import { echoPipelineMonitorService } from './monitoring/echoPipeline.monitor.service.js'
+import { situationNetworkMonitorService } from './monitoring/situationNetwork.monitor.service.js'
 import { themisService }      from './monitoring/themis.monitor.service.js'
 import { executionReconciler } from './monitoring/execution.reconciler.js'
 import { paperFillService }  from './monitoring/paperFill.service.js'
@@ -300,6 +301,7 @@ function startBackgroundLoops() {
     startLoop('prometheusScorecard', prometheusScorecardMonitorService)   // Prometheus's calls graded vs SPY
     startLoop('echoReads',   echoReadsMonitorService)   // Echo's lagging names → Prometheus + Proteus (ECHO_READS)
     startLoop('echoPipeline', echoPipelineMonitorService)   // Echo's events through the doc's steps (ECHO_PIPELINE, opt-in)
+    startLoop('situationNetwork', situationNetworkMonitorService)   // the situation network: build, weekly, rebuild, events (SITUATION_NETWORK, opt-in)
     startLoop('themis',       themisService)
     startLoop('reconciler',   executionReconciler)
     startLoop('paperFill',    paperFillService)

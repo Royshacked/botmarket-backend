@@ -178,7 +178,9 @@ export function assemble(questions, combined, asOf) {
         if (drops.has(n)) continue
         const q = questions[n - 1]
         const input = {
-            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', confidence: c.confidence,
+            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', confidence: c.confidence, impact: q.impact,
+            // The drift rule's first baseline: the build's numbers (Roy reviews the open nodes from the first card).
+            review: { on: asOf, p: Object.fromEntries(q.options.map((o, i) => [o.key, c.p[i]])) },
             options: q.options.map((o, i) => ({ key: o.key, label: o.label, p: c.p[i], signpost: c.signposts[o.key] ?? NO_SIGNPOST })),
             lag: c.lag, resolve_by: c.resolve_by, reasoning: [c.reasoning, c.base_rate ? `Base rate: ${c.base_rate}` : null].filter(Boolean).join(' '),
             given: c.given ? { node_id: ids.get(c.given.question), option: c.given.option } : null,

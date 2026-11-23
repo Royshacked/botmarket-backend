@@ -250,6 +250,9 @@ export const config = {
     // starts. Who may see it at all (Axl's tool, the board) is an ALLOW-LIST of user ids, not the admin role: Roy and
     // Marce during the forward test, and Marce is a trader. Unset → nobody.
     get situationNetwork()     { return _bool('SITUATION_NETWORK', 'opt-in') },
+    // The weekly LLM budget (Roy's call 4, set once one build was measured: the full build $1.86, an update about $0.5).
+    // Past it, event updates wait for the weekly run; the weekly run and the monthly rebuild always go.
+    get situationWeeklyUsd()   { return _num('SITUATION_WEEKLY_USD', 10) },
     get situationUsers() {
         const raw = _raw('SITUATION_USERS') ?? ''
         return raw.split(',').map(s => s.trim()).filter(Boolean)
