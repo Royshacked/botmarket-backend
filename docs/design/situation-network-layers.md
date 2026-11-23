@@ -233,7 +233,8 @@ Steps:
 - $4.53: the sector states and networks $3.73, the mapping $0.81. All 11 sectors built; 20 links cross layers.
 - 85 industries scored (the macro layer alone: 54). Biotechnology: wins 36%, loses 21%; the macro layer alone: no view.
 - 5 sector questions were promoted to the macro layer (3+ sectors reached), e.g. Alphabet and Meta capex, AI data-center
-  spending cuts, US gas storage, existing-home sales. Roy to judge whether 3 sectors is too loose a bar.
+  spending cuts, US gas storage, existing-home sales. Roy, 2026-11-23: keep 3 for now and watch the promotions for a few weeks; if small stories crowd the macro layer, raise
+  it to 4 or also require a link to the market question.
 - Some sector questions were single-company events (the Super Bowl audience, Netflix guidance): the sector prompt now
   asks for the INDUSTRY's question.
 - GNews refused 5 of the 22 topics (too many requests a second, three sectors at once): the provider now spaces every
