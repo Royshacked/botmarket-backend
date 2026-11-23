@@ -57,6 +57,19 @@ export function checkBundle(bundle = {}) {
     }
     const byId = new Map(out.nodes.map(n => [n.node_id, n]))
     if (byId.size !== out.nodes.length) return { ok: false, reason: 'node: two nodes share an id' }
+    for (const n of out.nodes) {
+        if (!n.given) continue
+        const parent = byId.get(n.given.node_id)
+        if (!parent || !parent.options.some(o => o.key === n.given.option)) return { ok: false, reason: `node: "${n.question.slice(0, 40)}" hangs under ${n.given.node_id}.${n.given.option}, which is not in the run` }
+    }
+    // No node may hang under itself, however far up (a loop of givens has no path probability).
+    for (const n of out.nodes) {
+        const seen = new Set([n.node_id])
+        for (let g = n.given; g; g = byId.get(g.node_id)?.given) {
+            if (seen.has(g.node_id)) return { ok: false, reason: `node: the givens above "${n.question.slice(0, 40)}" loop` }
+            seen.add(g.node_id)
+        }
+    }
     out.links = []
     for (const l of bundle.links ?? []) {
         const c = checkLink(l, byId)

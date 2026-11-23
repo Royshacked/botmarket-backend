@@ -148,7 +148,23 @@ export function checkNode(input = {}) {
         }
         review = { on: r.on, p }
     }
+    // A node can hang under ONE branch of a parent (a tree): its probabilities are then CONDITIONAL on that branch, and
+    // a path's probability is the product along it (the design's 0.85 × 0.25 × 0.75 × 0.55).
+    let given = null
+    if (input.given != null) {
+        if (!input.given.node_id || !KEY.test(String(input.given.option ?? ''))) return bad(`"${question.slice(0, 40)}": given is { node_id, option } — the branch this node hangs under`)
+        given = { node_id: input.given.node_id, option: input.given.option }
+    }
+    // The ANCHOR: the numbers as last SET (by the model or Roy) and each incoming link's source branch at that moment.
+    // Propagation moves a node from its anchor by how much its sources have moved SINCE (propagate.js).
+    let anchor = null
+    if (input.anchor != null) {
+        const a = input.anchor
+        if (typeof a.p !== 'object' || a.p === null || typeof a.src !== 'object' || a.src === null) return bad(`"${question.slice(0, 40)}": anchor is { p, src }`)
+        anchor = { p: { ...a.p }, src: { ...a.src }, on: a.on ?? null }
+    }
     return ok({
+        given, anchor,
         review,
         node_id: input.node_id ?? newId('node'), tree, question, kind, status, options,
         lag: lag.value, resolve_by: input.resolve_by ?? null, resolved,

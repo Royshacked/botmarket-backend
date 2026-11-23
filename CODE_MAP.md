@@ -1271,6 +1271,13 @@ services/
                             the reading sections (regime readings, policy, money, stories, calendar) and 15–35 open
                             questions; shapeAnswer (sources from cited articles, an uncited FACT dropped, dates clamped,
                             questions tidied, ≤ MAX_QUESTIONS); checkState; cost_usd measured (first live build $0.37).
+  situation/network.js      buildNetwork(state, questions): RUNS=3 Opus calls (prompts/situation_network.md) → combineRuns
+                            (median per option, givens / duplicates / links by majority, strength → log-odds shift) →
+                            assemble (low impact + duplicates dropped, OPEN_CAP 20 by impact × entropy, settled outside the
+                            cap, children follow dropped parents, anchors, forecasts, the dropped list). First live: $1.01.
+  situation/propagate.js    the update engine, pure: reach / marginal / pathProbability / treePaths (givens = trees),
+                            resolve, anchorFor, propagate (a link shifts log-odds by how far its source MOVED since the
+                            target's anchor; until < 1 point or 10 rounds), split (partial resolutions).
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

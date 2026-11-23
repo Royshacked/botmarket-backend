@@ -144,6 +144,19 @@ conflict check, then the QA / CR / docs cycle. Then switch the flag on and decla
 | 12–13 | Axl + board | driven with both accounts and a third |
 | 14 | Finish | QA / CR / docs, then the forward test starts |
 
+## Built differently from the plan (for Roy, 2026-11-23)
+
+1. **A link is weighted by how much its branch MOVED, not by its level** (§6, `propagate.js`). The model's numbers
+   already take the sources' current state into account, so weighting by the level would count every link twice.
+   Each node keeps an **anchor** (its numbers when last set, and each source branch then); a link adds
+   `shift × (source now − source at the anchor)` to the target's log-odds.
+2. **Trees are real:** a node may hang under one branch of a parent (`given`); its numbers are conditional and a path
+   multiplies along it (the design's 9% example is a test). On the first live build the model hung no question under
+   another; the 29 links carried the connections.
+3. **Fixed models, not the house model setting:** the state and the network run on Opus 5.5 (as Echo's mapping does).
+4. First live build (2026-11-23, laptop): state $0.37 (28 questions, 168 articles), network $1.01 (3 runs; 24 nodes:
+   20 open, 4 settled; 4 dropped; 29 links).
+
 ## Calls Roy made (2026-11-23)
 
 1. A link moves its target by a **log-odds shift**, weighted by its branch's probability, then renormalised (§6).
