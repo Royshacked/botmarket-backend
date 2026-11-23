@@ -21,6 +21,7 @@ import { buildState } from './state.js'
 import { runUpdate, numbered } from './update.js'
 import { latestRun, readRun, COLLECTIONS } from './store.js'
 import { postReviewCard } from './review.js'
+import { runControl } from './control.js'
 import { config } from '../config.js'
 import { logger } from '../logger.service.js'
 
@@ -43,6 +44,8 @@ const _io = {
     record: (payer, model, usage) => recordUsage(payer, model, usage, 'situation', { monitor: true }),
     payer: async () => { const { houseLedgerUserId } = await import('../../api/user/user.model.js'); return houseLedgerUserId() },
     card: (run_id) => postReviewCard(run_id),
+    // The control, once per scheduled run, over the industries the network scored (the same universe).
+    control: async (run_id) => { const run = await readRun(run_id); return run?.state ? runControl(run.state, (run.industries ?? []).map(i => ({ code: i.code, name: i.name, level: i.level })), run.run.as_of) : null },
     budget: () => config.situationWeeklyUsd,
 }
 export function _setIO(io) { Object.assign(_io, io) }
@@ -94,19 +97,19 @@ export async function tick() {
         const kind = dueKind(head, lastBuild?.as_of ?? null, today)
         if (kind === 'build') {
             const r = await _io.build({ asOf: today, kind: 'build' })
-            if (r.ok) await _io.card(r.run_id)
+            if (r.ok) { await _io.card(r.run_id); await _io.control(r.run_id) }
             return { did: 'build', ...r }
         }
         if (kind === 'rebuild') {
             const st = await _io.state(today)
             if (!st.ok) return { did: 'rebuild', ok: false, reason: st.reason }
             const r = await _io.update({ kind: 'rebuild', asOf: today, fresh: st })
-            if (r.ok) await _io.card(r.run_id)
+            if (r.ok) { await _io.card(r.run_id); await _io.control(r.run_id) }
             return { did: 'rebuild', ...r }
         }
         if (kind === 'weekly') {
             const r = await _io.update({ kind: 'weekly', asOf: today })
-            if (r.ok) await _io.card(r.run_id)
+            if (r.ok) { await _io.card(r.run_id); await _io.control(r.run_id) }
             return { did: 'weekly', ...r }
         }
         // The watch.

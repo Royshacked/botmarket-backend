@@ -39,12 +39,12 @@ test('tick: off unless SITUATION_NETWORK; the first build; then the weekly; each
         process.env.SITUATION_NETWORK = 'true'
         const cards = [], did = []
         _setIO({ now: () => new Date('2025-01-07T12:00:00Z'), db: async () => fakeDb(), latest: async () => null,
-            build: async (o) => { did.push(o.kind); return { ok: true, run_id: 'r1' } }, card: async (id) => cards.push(id) })
+            build: async (o) => { did.push(o.kind); return { ok: true, run_id: 'r1' } }, card: async (id) => cards.push(id), control: async (id) => did.push(`control ${id}`) })
         assert.equal((await tick()).did, 'build')
         _setIO({ latest: async () => ({ run_id: 'r1', as_of: '2024-12-31' }), db: async () => fakeDb([{ kind: 'build', as_of: '2024-12-31', complete: true }]),
             update: async (o) => { did.push(o.kind); return { ok: true, run_id: 'r2' } } })
         assert.equal((await tick()).did, 'weekly')
-        assert.deepEqual(did, ['build', 'weekly'])
+        assert.deepEqual(did, ['build', 'control r1', 'weekly', 'control r2'])
         assert.deepEqual(cards, ['r1', 'r2'])
     } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
 })
