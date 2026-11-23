@@ -93,22 +93,46 @@ export function shapeEffects(data, branches, codes) {
     return { effects: out, dropped }
 }
 
-/** One mapping call → `{ ok, effects, cost_usd, dropped }`. */
+/** The mapping runs: two, and an effect is kept only when both name it (Roy, 2026-11-23: "fix all"). */
+export const MAP_RUNS = 2
+
+/**
+ * Two runs' effects → only those both runs name for the same branch, with the same direction; the size is the SMALLER
+ * of the two buckets (the first live build mapped Health Care Technology up on US strikes on Iran — one run's noise).
+ * Pure.
+ */
+export function agreeEffects(a, b) {
+    const out = new Map()
+    let disagreed = 0
+    for (const [k, xs] of a) {
+        const ys = b.get(k) ?? []
+        const kept = []
+        for (const x of xs) {
+            const y = ys.find(e => e.code === x.code && e.direction === x.direction)
+            if (!y) { disagreed++; continue }
+            kept.push(BUCKET_WEIGHT[y.bucket] < BUCKET_WEIGHT[x.bucket] ? { ...x, bucket: y.bucket } : x)
+        }
+        disagreed += ys.filter(y => !xs.some(x => x.code === y.code && x.direction === y.direction)).length
+        out.set(k, kept)
+    }
+    return { effects: out, disagreed }
+}
+
+/** MAP_RUNS mapping calls → `{ ok, effects, cost_usd, dropped, disagreed, runs }`; one answer alone is used as it is. */
 export async function mapBranches(nodes, industries) {
     const branches = branchList(nodes)
     let cost = 0, payer = null
     try { payer = await _io.payer() } catch { /* unbooked */ }
-    let res
-    try {
-        res = await _io.call({ model: MAP_MODEL, effort: MAP_EFFORT, systemPrompt: _io.system(), user: mapPrompt(branches, industries), schema: mapSchema(),
-            onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
-    } catch (err) {
-        logger.warn(LOG, 'the mapping call failed', { error: err.message })
-        return { ok: false, reason: `the mapping call failed: ${err.message}`, cost_usd: cost }
-    }
-    if (!res?.data) return { ok: false, reason: `the mapping call returned no answer (${res?.stopReason ?? 'unknown'})`, cost_usd: cost }
-    const shaped = shapeEffects(res.data, branches, new Set(industries.map(i => i.code)))
-    return { ok: true, effects: shaped.effects, dropped: shaped.dropped, cost_usd: cost }
+    const codes = new Set(industries.map(i => i.code))
+    const one = () => _io.call({ model: MAP_MODEL, effort: MAP_EFFORT, systemPrompt: _io.system(), user: mapPrompt(branches, industries), schema: mapSchema(),
+        onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
+        .then(r => (r?.data ? shapeEffects(r.data, branches, codes) : null))
+        .catch(err => { logger.warn(LOG, 'a mapping run failed', { error: err.message }); return null })
+    const runs = (await Promise.all(Array.from({ length: MAP_RUNS }, one))).filter(Boolean)
+    if (!runs.length) return { ok: false, reason: 'no mapping run answered', cost_usd: cost }
+    if (runs.length === 1) return { ok: true, effects: runs[0].effects, dropped: runs[0].dropped, disagreed: null, runs: 1, cost_usd: cost }
+    const agreed = agreeEffects(runs[0].effects, runs[1].effects)
+    return { ok: true, effects: agreed.effects, dropped: runs[0].dropped + runs[1].dropped, disagreed: agreed.disagreed, runs: 2, cost_usd: cost }
 }
 
 /** A small seeded random generator (mulberry32). Pure. */

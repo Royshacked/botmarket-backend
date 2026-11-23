@@ -7,7 +7,7 @@
 // new run: the node at Roy's numbers, re-anchored, spread, the industries re-scored; both numbers are logged.
 
 import { postCard } from '../notifyCard.js'
-import { readRun, latestRun, saveRun } from './store.js'
+import { readRun, latestRun, saveRun, getBusy } from './store.js'
 import { anchorFor, propagate } from './propagate.js'
 import { scoreIndustries, wouldBeEntries } from './industries.js'
 import { effectsFromNodes } from './build.js'
@@ -17,7 +17,7 @@ import { logger } from '../logger.service.js'
 const LOG = '[situation.review]'
 
 const _io = {
-    read: (id) => readRun(id), latest: () => latestRun(), save: (b) => saveRun(b),
+    read: (id) => readRun(id), latest: () => latestRun(), save: (b) => saveRun(b), busy: () => getBusy(),
     post: (card, ctx) => postCard(card, ctx),
     roy: async () => { const { houseLedgerUserId } = await import('../../api/user/user.model.js'); return houseLedgerUserId() },
     now: () => new Date(),
@@ -74,6 +74,9 @@ export async function postReviewCard(run_id) {
  */
 export async function overrideNode(node_id, p, userId) {
     if (!canSeeSituation(userId)) return { ok: false, reason: 'not allowed' }
+    // An update running now would save over this override (code review 2026-11-23): wait for it.
+    const busy = await _io.busy()
+    if (busy) return { ok: false, reason: `a ${busy.kind} update is running (since ${busy.since}) — try again in a few minutes` }
     const head = await _io.latest()
     if (!head) return { ok: false, reason: 'no network yet' }
     const prev = await _io.read(head.run_id)
@@ -92,6 +95,8 @@ export async function overrideNode(node_id, p, userId) {
     const inds = (prev.industries ?? []).map(r => ({ code: r.code, name: r.name, level: r.level }))
     const industries = scoreIndustries(spread.nodes, prev.links, effectsFromNodes(spread.nodes), inds)
     const forecasts = n.options.map((o, i) => ({ node_id, option: o.key, p: xs[i] / sum, set_by: 'roy', llm_p: o.p, resolve_by: n.resolve_by }))
+    // The network must still be where this override started from.
+    if ((await _io.latest())?.run_id !== head.run_id) return { ok: false, reason: 'the network changed meanwhile — open it again and re-enter your numbers' }
     const saved = await _io.save({
         run: { kind: 'event', as_of: asOf, trigger: "Roy's override", parent_run_id: head.run_id },
         state: prev.state ? { ...prev.state, as_of: asOf } : null, nodes: spread.nodes, links: prev.links, dropped: prev.dropped, industries, forecasts,

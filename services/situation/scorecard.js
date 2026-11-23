@@ -103,6 +103,28 @@ export function spreadSummary(xs) {
     return { n: v.length, mean: mean(v), t: tstat(v), first_half: mean(v.slice(0, half)), second_half: mean(v.slice(half)) }
 }
 
+/** The ISO week (Monday-based) of a date, `YYYY-Www`. Pure. */
+export function isoWeek(iso) {
+    const d = new Date(`${iso}T00:00:00Z`)
+    d.setUTCDate(d.getUTCDate() - ((d.getUTCDay() + 6) % 7) + 3)
+    const jan4 = new Date(Date.UTC(d.getUTCFullYear(), 0, 4))
+    const w = 1 + Math.round(((d - jan4) / 864e5 - 3 + ((jan4.getUTCDay() + 6) % 7)) / 7)
+    return `${d.getUTCFullYear()}-W${String(w).padStart(2, '0')}`
+}
+
+/** The last item of each ISO week (items oldest first, each with `as_of`). Pure. */
+export function onePerWeek(items) {
+    const m = new Map()
+    for (const x of items) m.set(isoWeek(x.as_of), x)
+    return [...m.values()]
+}
+
+export const SCORED_KINDS = Object.freeze(['build', 'rebuild', 'weekly'])
+/** The runs the industry test scores: per ISO week, the latest scheduled run (runs oldest first). Pure. */
+export function scoredRuns(runs) {
+    return onePerWeek(runs.filter(r => SCORED_KINDS.includes(r.kind)))
+}
+
 /** The declared pass rule on the numbers. Pure. */
 export function verdict(nodes, m6, startedOn, today) {
     const months = startedOn ? (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${startedOn}T00:00:00Z`)) / (30.44 * 864e5) : 0
@@ -124,7 +146,7 @@ export async function buildScorecard() {
     const P = { projection: { _id: 0 } }
     const [forecasts, runs, control] = await Promise.all([
         db.collection(COLLECTIONS.forecasts).find({ outcome: { $in: [0, 1] } }, P).toArray(),
-        db.collection(COLLECTIONS.runs).find({ complete: true }, P).sort({ as_of: 1 }).toArray(),
+        db.collection(COLLECTIONS.runs).find({ complete: true }, P).sort({ as_of: 1, finished_at: 1 }).toArray(),
         db.collection(CONTROL).find({}, P).sort({ as_of: 1 }).toArray(),
     ])
     // The basket lines are ~3 MB (28 s over the M0 link, the 2026-11-23 drive): read only once a call is old enough to
@@ -132,16 +154,19 @@ export async function buildScorecard() {
     const oldest = [runs[0]?.as_of, control[0]?.as_of].filter(Boolean).sort()[0] ?? null
     const gradable = oldest && (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${oldest}T00:00:00Z`)) / 864e5 >= MIN_DAYS_TO_GRADE
     const index = gradable ? await _indexLines(edb) : []
-    // One scored date per week: the last complete run of each as-of date.
-    const lastOf = new Map()
-    for (const r of runs) lastOf.set(r.as_of, r.run_id)
-    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: [...lastOf.values()] } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1 } }).toArray()
+    // ONE scored run per ISO week: its latest SCHEDULED run (build, rebuild, weekly) — never an event update or an
+    // override, which would add near-identical, overlapping 6-month windows and inflate the t-stat (code review
+    // 2026-11-23). The control likewise, one per week.
+    const weekly = scoredRuns(runs)
+    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: weekly.map(r => r.run_id) } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1 } }).toArray()
     const byRun = new Map()
     for (const i of inds) { if (!byRun.has(i.run_id)) byRun.set(i.run_id, []); byRun.get(i.run_id).push(i) }
     const callsOf = (rows, as_of) => ({ as_of, long: rows.filter(r => r.p_win >= CALL_AT).map(r => `${r.level}:${r.code}`), short: rows.filter(r => r.p_lose >= CALL_AT).map(r => `${r.level}:${r.code}`) })
-    const calls = [...lastOf.entries()].map(([as_of, id]) => callsOf(byRun.get(id) ?? [], as_of))
-    const ctrl = control.map(c => callsOf(c.rows ?? [], c.as_of))
-    const nodes = nodeScores(forecasts)
+    const calls = weekly.map(r => callsOf(byRun.get(r.run_id) ?? [], r.as_of))
+    const ctrl = onePerWeek(control).map(c => callsOf(c.rows ?? [], c.as_of))
+    // Only forecasts logged by a run that was SAVED whole count (a save that failed part-way leaves rows behind).
+    const complete = new Set(runs.map(r => r.run_id))
+    const nodes = nodeScores(forecasts.filter(f => complete.has(f.run_id)))
     const net = { m3: spreadSummary(spreads(calls, index, HORIZONS.m3)), m6: spreadSummary(spreads(calls, index, HORIZONS.m6)) }
     const plain = { m3: spreadSummary(spreads(ctrl, index, HORIZONS.m3)), m6: spreadSummary(spreads(ctrl, index, HORIZONS.m6)) }
     const startedOn = runs.find(r => r.kind === 'build')?.as_of ?? null

@@ -85,13 +85,13 @@ test('the mapping: schema strict, branches numbered, unknown codes and repeats d
     assert.equal(eff.dropped, 1)
 })
 
-test('mapBranches: one call, the cost measured; a failure is said', async () => {
+test('mapBranches: two calls, the cost of both measured; no answer at all is said', async () => {
     _setIO({ payer: async () => null, system: () => 'S', call: async (a) => { a.onUsage({ input_tokens: 1000, output_tokens: 1000 }, 'claude-opus-5-5'); return { data: { branches: [] } } } })
     const r = await mapBranches([node('x', { a: 0.5, b: 0.5 })], [])
     assert.equal(r.ok, true)
-    near(r.cost_usd, (1000 * 4 + 1000 * 20) / 1e6)
+    near(r.cost_usd, 2 * (1000 * 4 + 1000 * 20) / 1e6)
     _setIO({ call: async () => { throw new Error('overloaded') } })
-    assert.match((await mapBranches([node('x', { a: 0.5, b: 0.5 })], [])).reason, /overloaded/)
+    assert.match((await mapBranches([node('x', { a: 0.5, b: 0.5 })], [])).reason, /no mapping run answered/)
 })
 
 // ── scoring ──

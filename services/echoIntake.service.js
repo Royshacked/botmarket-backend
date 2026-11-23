@@ -231,14 +231,17 @@ export async function clinical(now = _deps.now()) {
  * situation network's weekly build (services/situation/news.js) reads `days` back over `pages` pages.
  */
 export async function news(now = _deps.now(), { days = 1, pages = 1 } = {}) {
+    const since = daysAgo(now, days)
     let rows = []
     for (let page = 0; page < pages; page++) {
         let got
         try { got = await _deps.fmp(`/news/general-latest?page=${page}&limit=60`, { label: 'FMP general news' }) } catch { if (page === 0) return []; break }
         if (!Array.isArray(got) || !got.length) break
         rows = rows.concat(got)
+        // Newest first: once a page reaches back past `since`, the window is covered (code review 2026-11-23 — eight
+        // fixed pages could cover only the last day or two of a week).
+        if (got.some(r => String(r.publishedDate).slice(0, 10) < since)) break
     }
-    const since = daysAgo(now, days)
     return rows.filter(r => String(r.publishedDate).slice(0, 10) >= since).map(r => ({
         key: `news|${r.url ?? r.title}`, source: 'news', date: String(r.publishedDate).slice(0, 10), tickers: [],
         title: r.title, text: clip(r.text, 600), url: r.url ?? null, hint: null,

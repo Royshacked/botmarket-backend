@@ -22,11 +22,13 @@ export const GNEWS_TOPICS = Object.freeze([
 export const MAX_ARTICLES = 200
 /** FMP's general news runs to hundreds a day; at most this many per day, so a week is a week and not its last day. */
 export const FMP_PER_DAY = 10
+/** FMP's pages are read until they reach back past the window (echoIntake.news stops there); this many at most. */
+export const FMP_MAX_PAGES = 40
 const TEXT_MAX = 500
 
 const _io = {
     policy: (now, days) => echoIntakeService.policy(now, { days }),
-    fmpNews: (now, days) => echoIntakeService.news(now, { days, pages: Math.min(8, days + 1) }),
+    fmpNews: (now, days) => echoIntakeService.news(now, { days, pages: FMP_MAX_PAGES }),
     defense: (now) => echoIntakeService.defense(now),
     gnews: (q, from, to) => fetchGNews({ query: q, from, to, max: 10 }),
     hasGnews: () => Boolean(config.gnewsApiKey),

@@ -17,13 +17,14 @@ import { dirname, join } from 'path'
 import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
-import { checkNode, newId, SETTLED_AT, BUCKETS } from './model.js'
+import { checkNode, newId, SETTLED_AT, BUCKETS, KEY, snake, realDate } from './model.js'
 import { propagate, resolve, anchorFor } from './propagate.js'
 import { fetchNews, articleLines } from './news.js'
 import { buildExposures } from './exposure.js'
 import { mapBranches, scoreIndustries, wouldBeEntries } from './industries.js'
 import { effectsFromNodes } from './build.js'
-import { uncertainty, IMPACT_WEIGHT, OPEN_CAP } from './network.js'
+import { uncertainty, IMPACT_WEIGHT, OPEN_CAP, NO_SIGNPOST, linksFor } from './network.js'
+import { buildDataSections } from './state.data.js'
 import { saveRun, latestRun, readRun, gradeForecasts } from './store.js'
 import { logger } from '../logger.service.js'
 
@@ -45,6 +46,7 @@ const _io = {
     payer: async () => { const { houseLedgerUserId } = await import('../../api/user/user.model.js'); return houseLedgerUserId() },
     system: () => _system(),
     exposures: (names) => buildExposures(names), map: (nodes, inds) => mapBranches(nodes, inds),
+    links: (nodes, ids) => linksFor(nodes, ids), data: (asOf) => buildDataSections(asOf),
     save: (b) => saveRun(b), grade: (nodeId, option, on) => gradeForecasts(nodeId, option, on),
 }
 export function _setIO(io) { Object.assign(_io, io) }
@@ -104,10 +106,43 @@ export function updatePrompt(asOf, prevAsOf, list, articles, candidates = []) {
         `THE NEW ARTICLES (${articles.length}):`, articleLines(articles), '', 'Decide every piece of news that matters; then the signposts; then the due questions.'].join('\n')
 }
 
-const KEY = /^[a-z0-9_]{1,40}$/
-const snake = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40)
-const realDate = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T00:00:00Z`).toISOString?.().slice(0, 10) === d
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10)
+
+// A missing signpost or evidence is SAID, never left empty: checkNode requires a signpost on every dormant option and
+// evidence on every resolution, and a later week that turns an option dormant must not fail the save (code review
+// 2026-11-23). The build's placeholder, the same words.
+const signpostOr = (s) => (String(s ?? '').trim() ? s : NO_SIGNPOST)
+const evidenceOr = (s, fallback) => (String(s ?? '').trim() || String(fallback ?? '').trim() || 'no evidence was given')
+
+/**
+ * The ids to drop with these: every node hanging (by `given`) under one of them, however far down. A dropped parent
+ * cannot leave its children behind — the save would reject them (code review 2026-11-23). Pure.
+ */
+export function withDescendants(nodes, ids) {
+    const out = new Set(ids)
+    let grew = true
+    while (grew) {
+        grew = false
+        for (const n of nodes) if (n.given && out.has(n.given.node_id) && !out.has(n.node_id)) { out.add(n.node_id); grew = true }
+    }
+    return [...out]
+}
+
+/** Was this item written by CODE (state.data.js)? Its sources name a feed, never an article. Pure. */
+export const isCodeItem = (i) => /^(FRED |FMP daily bars|FMP earnings calendar|engine |federalreserve\.gov)/.test(String(i?.source ?? ''))
+
+/**
+ * The code's data items replaced by fresh ones; everything the MODEL wrote (its readings, and its facts from articles in
+ * money and calendar) kept. Pure.
+ */
+export function refreshSections(prev = {}, data = {}) {
+    const out = { ...prev }
+    for (const k of ['regime', 'prices', 'money', 'calendar']) {
+        if (!Array.isArray(data[k])) continue
+        out[k] = [...data[k], ...(prev[k] ?? []).filter(i => !isCodeItem(i))]
+    }
+    return out
+}
 
 /** A probabilities list over a node's option keys → numbers summing to 1, or null if it does not fit. Pure. */
 export function fitProbabilities(keys, list) {
@@ -160,27 +195,31 @@ export function applyAnswer(data, list, nodes, asOf) {
     for (const e of data?.events ?? []) {
         const id = e.node != null ? at(e.node) : null
         const log = { decision: e.decision, node_id: id, summary: String(e.summary ?? '').slice(0, 300), reasoning: String(e.reasoning ?? '').slice(0, 1200), articles: e.articles ?? [], applied: false }
-        if (e.decision === 'moves_option' && id) {
+        // Only a LIVE node can move or grow: an earlier decision in this same answer may have resolved it (code review
+        // 2026-11-23: a resolved node was saved at 70/30).
+        const live = id && get(id)?.status === 'live'
+        if (e.decision === 'moves_option' && live) {
             const n = get(id), p = fitProbabilities(n.options.map(o => o.key), e.probabilities)
             if (p) { set(id, x => ({ ...x, options: x.options.map((o, i) => ({ ...o, p: p[i] })) })); rejudged.add(id); log.applied = true }
-        } else if (e.decision === 'new_option' && id && e.new_option) {
+        } else if (e.decision === 'new_option' && live && e.new_option) {
             const n = get(id), key = KEY.test(e.new_option.key) ? e.new_option.key : snake(e.new_option.key || e.new_option.label)
             if (key && n.options.length < 4 && !n.options.some(o => o.key === key)) {
                 const keys = [...n.options.map(o => o.key), key], p = fitProbabilities(keys, e.probabilities)
                 if (p) {
-                    set(id, x => ({ ...x, options: [...x.options, { key, label: String(e.new_option.label).slice(0, 160), p: 0, signpost: e.new_option.signpost, effects: [] }].map((o, i) => ({ ...o, p: p[i] })) }))
+                    set(id, x => ({ ...x, options: [...x.options, { key, label: String(e.new_option.label).slice(0, 160), p: 0, signpost: signpostOr(e.new_option.signpost), effects: [] }].map((o, i) => ({ ...o, p: p[i] })) }))
                     rejudged.add(id); needMap.add(id); log.applied = true; log.option = key
                 }
             }
-        } else if (e.decision === 'resolves' && id && e.resolution) {
+        } else if (e.decision === 'resolves' && live && e.resolution) {
             const n = get(id)
             if (n.options.some(o => o.key === e.resolution.option)) {
-                cur = resolve(cur, id, e.resolution.option, { evidence: e.resolution.evidence, on: asOf, by: 'llm' })
-                resolved.push({ node_id: id, option: e.resolution.option, evidence: e.resolution.evidence }); log.applied = true
+                const evidence = evidenceOr(e.resolution.evidence, e.summary)
+                cur = resolve(cur, id, e.resolution.option, { evidence, on: asOf, by: 'llm' })
+                resolved.push({ node_id: id, option: e.resolution.option, evidence }); log.applied = true
             }
         } else if (e.decision === 'new_question' && e.new_question) {
             const q = e.new_question
-            const opts = (q.options ?? []).map(o => ({ key: KEY.test(o.key) ? o.key : snake(o.key || o.label), label: o.label, signpost: o.signpost }))
+            const opts = (q.options ?? []).map(o => ({ key: KEY.test(o.key) ? o.key : snake(o.key || o.label), label: o.label, signpost: signpostOr(o.signpost) }))
             const p = fitProbabilities(opts.map(o => o.key), q.probabilities)
             const checked = p ? checkNode({
                 node_id: newId('node'), tree: snake(q.tree) || 'other', question: q.question, set_by: 'llm',
@@ -208,8 +247,9 @@ export function applyAnswer(data, list, nodes, asOf) {
         const id = at(d.node), n = id && get(id)
         if (!n || n.status !== 'live') continue
         if (d.resolved && n.options.some(o => o.key === d.option)) {
-            cur = resolve(cur, id, d.option, { evidence: d.evidence, on: asOf, by: 'llm' })
-            resolved.push({ node_id: id, option: d.option, evidence: d.evidence })
+            const evidence = evidenceOr(d.evidence, 'its resolve-by date passed')
+            cur = resolve(cur, id, d.option, { evidence, on: asOf, by: 'llm' })
+            resolved.push({ node_id: id, option: d.option, evidence })
         } else {
             const next = realDate(d.new_resolve_by) && d.new_resolve_by > asOf ? d.new_resolve_by : addDays(asOf, 14)
             set(id, x => ({ ...x, resolve_by: next }))
@@ -247,22 +287,33 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         if (!res?.data) return { ok: false, reason: `the update call returned no answer (${res?.stopReason ?? 'unknown'})`, cost_usd: cost }
         const applied = applyAnswer(res.data, list, prev.nodes, asOf)
         let nodes = applied.nodes
-        // The new branches mapped to industries (only them).
+        // The new branches mapped to industries (only them). The industries keep their NAMES: exposures are keyed by basket
+        // (`level:code`), as build.js keys them (code review 2026-11-23: an empty map saved every industry as its code).
         const names = new Map((prev.industries ?? []).map(r => [r.code, r.name]))
+        const basketNames = new Map((prev.industries ?? []).map(r => [`${r.level}:${r.code}`, r.name]))
         let exp = null
         if (applied.needMap.size) {
-            exp = await _io.exposures(new Map())
+            exp = await _io.exposures(basketNames)
             const fresh = nodes.filter(n => applied.needMap.has(n.node_id))
             const m = await _io.map(fresh, exp.industries)
             cost += m.cost_usd ?? 0
             if (m.ok) nodes = nodes.map(n => (applied.needMap.has(n.node_id) ? { ...n, options: n.options.map(o => ({ ...o, effects: m.effects.get(`${n.node_id}|${o.key}`) ?? o.effects ?? [] })) } : n))
         }
-        // The cap.
-        const out = overCap(nodes)
-        const capDrops = out.map(id => nodes.find(n => n.node_id === id))
+        // The cap — and every node hanging under a dropped one goes with it.
+        const out = withDescendants(nodes, overCap(nodes))
+        const capDrops = out.map(id => nodes.find(n => n.node_id === id)).filter(Boolean)
         nodes = nodes.map(n => (out.includes(n.node_id) ? { ...n, status: 'dropped' } : n))
+        // Links: the ones still between two kept nodes, plus new ones for the questions this update added.
+        let links = (prev.links ?? []).filter(l => nodes.some(n => n.node_id === l.from.node_id && n.status !== 'dropped') && nodes.some(n => n.node_id === l.to.node_id && n.status !== 'dropped'))
+        const created = applied.created.filter(id => nodes.some(n => n.node_id === id && n.status === 'live'))
+        let linksAdded = 0
+        if (created.length) {
+            const nl = await _io.links(nodes, created)
+            cost += nl.cost_usd ?? 0
+            linksAdded = nl.links?.length ?? 0
+            links = [...links, ...(nl.links ?? [])]
+        }
         // Anchors for every node whose numbers were set this update, then spread.
-        const links = (prev.links ?? []).filter(l => nodes.some(n => n.node_id === l.from.node_id && n.status !== 'dropped') && nodes.some(n => n.node_id === l.to.node_id && n.status !== 'dropped'))
         nodes = nodes.map(n => (applied.rejudged.has(n.node_id) ? { ...n, anchor: anchorFor(nodes, links, n.node_id, asOf) } : n))
         const spread = propagate(nodes, links)
         nodes = spread.nodes
@@ -279,7 +330,6 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         const review = reviewItems(prev.nodes, nodes, applied)
         // Forecasts: every number SET this update is logged; resolutions grade every logged forecast of their node.
         const forecasts = nodes.filter(n => applied.rejudged.has(n.node_id) && n.status === 'live').flatMap(n => n.options.map(o => ({ node_id: n.node_id, option: o.key, p: o.p, set_by: 'llm', resolve_by: n.resolve_by })))
-        for (const r of applied.resolved) await _io.grade(r.node_id, r.option, asOf).catch(err => logger.warn(LOG, 'grading failed', { error: err.message }))
         const live = nodes.filter(n => n.status === 'live')
         const prevDropped = prev.dropped?.dropped ?? []
         const dropped = {
@@ -294,13 +344,29 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         const onCard = new Set(review.map(r => r.node_id))
         const keep = nodes.filter(n => n.status !== 'dropped')
             .map(n => (onCard.has(n.node_id) ? { ...n, review: { on: asOf, p: Object.fromEntries(n.options.map(o => [o.key, o.p])) } } : n))
-        const state = fresh?.state ?? (prev.state ? { as_of: asOf, sections: prev.state.sections, articles: news.articles } : null)
+        // The state: a rebuild brings its own; a weekly update REFRESHES the code's data sections (regime, prices, money,
+        // calendar — no model, so they are never a month stale under a new date) and keeps the model's readings; an event
+        // update carries the state over with its news.
+        let state = fresh?.state ?? (prev.state ? { as_of: asOf, sections: prev.state.sections, articles: news.articles } : null)
+        let dataGaps = []
+        if (!fresh?.state && kind === 'weekly' && state) {
+            const data = await _io.data(asOf).catch(err => ({ sections: null, gaps: [`data sections: ${err.message}`] }))
+            dataGaps = data.gaps ?? []
+            if (data.sections) state = { ...state, sections: refreshSections(prev.state.sections, data.sections) }
+        }
         const stats = {
             cost_usd: cost, decisions: applied.decisions, woken: early, resolved: applied.resolved, created: applied.created,
-            changes: spread.changes, rounds: spread.rounds, settled: spread.settled, review, entries, gaps: news.gaps,
+            changes: spread.changes, rounds: spread.rounds, settled: spread.settled, review, entries, gaps: [...(news.gaps ?? []), ...dataGaps],
+            links_added: linksAdded,
         }
+        // The network must not have moved while this ran (minutes, on Opus): an override saved meanwhile would be written
+        // over by numbers from before it (code review 2026-11-23). Moved → nothing saved; the next tick starts again.
+        const nowHead = await _io.latest()
+        if (nowHead?.run_id !== head.run_id) return { ok: false, reason: 'the network changed while the update ran (an override?) — not saved; the next tick re-runs it', cost_usd: cost }
         const saved = await _io.save({ run: { kind, as_of: asOf, trigger, parent_run_id: head.run_id }, state, nodes: keep, links, dropped, industries, forecasts, outside: applied.outside, stats })
         if (!saved.ok) return { ok: false, reason: saved.reason, cost_usd: cost }
+        // Grading only once the run that resolved them is SAVED: a failed save must leave no outcome behind.
+        for (const r of applied.resolved) await _io.grade(r.node_id, r.option, asOf).catch(err => logger.warn(LOG, 'grading failed', { error: err.message }))
         logger.info(LOG, 'updated', { run_id: saved.run_id, kind, decisions: applied.decisions.length, review: review.length, cost_usd: cost.toFixed(2) })
         return { ok: true, run_id: saved.run_id, stats }
     } catch (err) {

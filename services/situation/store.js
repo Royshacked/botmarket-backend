@@ -157,7 +157,11 @@ export async function gradeForecasts(node_id, option, on, deps = _deps) {
     if (!node_id || !option) return 0
     const db = await deps.db()
     const coll = db.collection(COLLECTIONS.forecasts)
-    const open = await coll.find({ node_id, outcome: null }, { projection: { _id: 0, forecast_id: 1, option: 1, p: 1 } }).toArray()
+    const rows = await coll.find({ node_id, outcome: null }, { projection: { _id: 0, forecast_id: 1, option: 1, p: 1, run_id: 1 } }).toArray()
+    // Only forecasts of runs saved WHOLE: a save that failed part-way leaves rows no run stands behind.
+    const runIds = [...new Set(rows.map(r => r.run_id))]
+    const complete = new Set((await db.collection(COLLECTIONS.runs).find({ run_id: { $in: runIds }, complete: true }, { projection: { _id: 0, run_id: 1 } }).toArray()).map(r => r.run_id))
+    const open = rows.filter(r => complete.has(r.run_id))
     for (const f of open) {
         const outcome = f.option === option ? 1 : 0
         await coll.updateOne({ forecast_id: f.forecast_id, outcome: null }, { $set: { outcome, resolved_on: on, brier: (f.p - outcome) ** 2 } })
@@ -183,7 +187,7 @@ export async function addForecasts(rows, run_id, deps = _deps) {
 /** The complete runs, newest first, headers only (the board's history). */
 export async function listRuns({ limit = 60 } = {}, deps = _deps) {
     const db = await deps.db()
-    return db.collection(COLLECTIONS.runs).find({ complete: true }, { projection: { _id: 0 } }).sort({ as_of: -1, finished_at: -1 }).limit(limit).toArray()
+    return db.collection(COLLECTIONS.runs).find({ complete: true }, { projection: { _id: 0, run_id: 1, kind: 1, as_of: 1, trigger: 1, finished_at: 1, 'stats.cost_usd': 1 } }).sort({ as_of: -1, finished_at: -1 }).limit(limit).toArray()
 }
 
 /** One node's numbers run by run, oldest first → `[{ run_id, as_of, kind, status, options: [{ key, p }] }]`. */
@@ -195,4 +199,25 @@ export async function nodeHistory(node_id, deps = _deps) {
     return rows.filter(r => byRun.has(r.run_id))
         .map(r => ({ run_id: r.run_id, as_of: byRun.get(r.run_id).as_of, kind: byRun.get(r.run_id).kind, at: byRun.get(r.run_id).finished_at, status: r.status, set_by: r.set_by, options: r.options.map(o => ({ key: o.key, label: o.label, p: o.p })) }))
         .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
+
+// ─── the BUSY flag (code review 2026-11-23): a scheduled or event update takes minutes on Opus; an override saved in that
+// window would be written over by the update's numbers. The watcher raises the flag around every update; an override
+// waits for it. A crashed process cannot hold it longer than `maxMs`. ─────────────────────────────────────────────────
+const BUSY = { coll: 'situation_watch', id: 'busy' }
+
+export async function setBusy(kind, deps = _deps) {
+    const db = await deps.db()
+    await db.collection(BUSY.coll).updateOne({ _id: BUSY.id }, { $set: { kind, since: deps.now() } }, { upsert: true })
+}
+export async function clearBusy(deps = _deps) {
+    const db = await deps.db()
+    await db.collection(BUSY.coll).updateOne({ _id: BUSY.id }, { $set: { kind: null, since: null } }, { upsert: true })
+}
+/** → `{ kind, since }` while an update runs (and for at most `maxMs`), else null. */
+export async function getBusy(maxMs = 30 * 60 * 1000, deps = _deps) {
+    const db = await deps.db()
+    const b = await db.collection(BUSY.coll).findOne({ _id: BUSY.id })
+    if (!b?.kind || !b.since) return null
+    return Date.parse(deps.now()) - Date.parse(b.since) < maxMs ? { kind: b.kind, since: b.since } : null
 }

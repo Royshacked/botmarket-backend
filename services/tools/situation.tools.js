@@ -44,6 +44,8 @@ export function formatSummary(run) {
 /** One industry. Pure. */
 export function formatIndustry(run, name) {
     const q = String(name ?? '').toLowerCase().trim()
+    // No name → say so (every string "includes" the empty one, so it used to match the first industry).
+    if (!q) return `Name the industry (\`name\`). The network scores ${run.industries.length}: ${run.industries.slice(0, 15).map(x => x.name).join(', ')}…`
     const r = run.industries.find(x => x.name.toLowerCase() === q) ?? run.industries.find(x => x.name.toLowerCase().includes(q) || x.code === q)
     if (!r) return `The network scores no industry matching "${name}". It scores ${run.industries.length}: ${run.industries.slice(0, 15).map(x => x.name).join(', ')}…`
     const nodes = new Map(run.nodes.map(n => [n.node_id, n]))

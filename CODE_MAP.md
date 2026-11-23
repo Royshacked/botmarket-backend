@@ -1282,21 +1282,27 @@ services/
                             on the residual the 10-year / Brent / dollar slopes with t; reactions vs all industries to the
                             DAILY_EVENTS (declared in the plan) and the monthly `industry_reactions` (aether
                             seed_industry_reactions.py, 2007–2025, survivors only); exposureLine for the prompt.
-  situation/industries.js   mapBranches (one Opus call, prompts/situation_industries.md: branch → ≤ 8 industries, up/down
-                            + bucket, grounded in exposureLine), scoreIndustries (5000 seeded samples of the network —
+  situation/industries.js   mapBranches (MAP_RUNS=2 Opus calls, prompts/situation_industries.md: branch → ≤ 8 industries,
+                            up/down + bucket, grounded in exposureLine; agreeEffects keeps what BOTH name, the smaller
+                            bucket), scoreIndustries (5000 seeded samples of the network —
                             givens gate children, links make a sample a coherent path → p_win, p_lose, bucket, agreement,
                             the branches behind it), wouldBeEntries (30/50/70% crossings; the record only, no trades).
   situation/build.js        buildFull: state → network → exposures → mapping → scores → saveRun (kind build | rebuild),
                             effects kept on each option, cost by stage, gaps, entries. First live: $1.86 all in.
   situation/update.js       runUpdate (weekly | event | rebuild with `fresh` state + candidate questions): ONE Opus call
                             (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
-                            new_question / resolves / outside / none), signposts fired, due questions → applyAnswer, new
-                            branches mapped, overCap (20 open), re-anchor + propagate, re-score, early warnings (woken
-                            branches, beside the scores), reviewItems (moved > 10 / drift since review / new / woken /
-                            resolved; silence = accept resets the baseline), forecasts graded on resolution. Live: $0.16.
-  situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d) → else the 3-hourly
-                            watch: Federal Register + FMP news → one Sonnet triage → an EVENT update at most once a day,
-                            inside SITUATION_WEEKLY_USD (default $10). After each run, Roy's card.
+                            new_question / resolves / outside / none), signposts fired, due questions → applyAnswer (live
+                            nodes only; empty signposts / evidence said), new branches mapped (names kept), new questions
+                            LINKED (network.linksFor), overCap + withDescendants (20 open), re-anchor + propagate, re-score,
+                            early warnings (woken branches, beside the scores), reviewItems (moved > 10 / drift since review
+                            / new / woken / resolved; silence = accept resets the baseline); a weekly REFRESHES the code's
+                            data sections (refreshSections); the head must not have moved before the save; forecasts graded
+                            AFTER the save. Live: $0.16–0.18.
+  situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d from the last SCHEDULED
+                            run) → else the 3-hourly watch: Federal Register + FMP news → one Sonnet triage → an EVENT
+                            update at most once a day, inside SITUATION_WEEKLY_USD (default $10; failed attempts and the
+                            control counted). A failed scheduled job is recorded and waits a day (RETRY_AFTER_MS). Every
+                            update runs under the store's BUSY flag; an override waits for it. After each run, Roy's card.
   situation/review.js       cardLines / postReviewCard (to Roy only, botId axl, type situation_review; the first build
                             lists every open node) and overrideNode (Roy's numbers → a new run: re-anchored, spread,
                             re-scored, both numbers logged as forecasts).

@@ -12,7 +12,7 @@ import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
 import { buildDataSections } from './state.data.js'
 import { fetchNews, articleLines } from './news.js'
-import { checkState, SECTIONS, TAGS } from './model.js'
+import { checkState, SECTIONS, TAGS, KEY, snake } from './model.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[situation.state]'
@@ -78,8 +78,6 @@ export function statePrompt(asOf, sections, articles, gaps = []) {
     ].filter(x => x !== null).join('\n')
 }
 
-const KEY = /^[a-z0-9_]{1,40}$/
-const _snake = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40)
 
 /**
  * The model's answer → state items (sources from the cited articles; as-of clamped to the state's date and to a real
@@ -110,10 +108,10 @@ export function shapeAnswer(data, asOf, articles) {
     const questions = []
     for (const q of data?.questions ?? []) {
         const question = String(q?.question ?? '').trim()
-        const opts = (q?.options ?? []).map(o => ({ key: KEY.test(o?.key) ? o.key : _snake(o?.key || o?.label), label: String(o?.label ?? '').trim() })).filter(o => o.key && o.label)
+        const opts = (q?.options ?? []).map(o => ({ key: KEY.test(o?.key) ? o.key : snake(o?.key || o?.label), label: String(o?.label ?? '').trim() })).filter(o => o.key && o.label)
         const keys = new Set(opts.map(o => o.key))
         if (!question || opts.length < 2 || opts.length > 4 || keys.size !== opts.length || !LEVELS.includes(q.impact) || !LEVELS.includes(q.uncertainty)) { dropped.questions++; continue }
-        questions.push({ question, tree: _snake(q.tree) || 'other', options: opts, impact: q.impact, uncertainty: q.uncertainty, why: String(q.why ?? '').trim() })
+        questions.push({ question, tree: snake(q.tree) || 'other', options: opts, impact: q.impact, uncertainty: q.uncertainty, why: String(q.why ?? '').trim() })
     }
     if (questions.length > MAX_QUESTIONS) { dropped.questions += questions.length - MAX_QUESTIONS; questions.length = MAX_QUESTIONS }
     return { sections, questions, dropped }

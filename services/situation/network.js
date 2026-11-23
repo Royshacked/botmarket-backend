@@ -16,7 +16,7 @@ import { dirname, join } from 'path'
 import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
-import { checkNode, newId, SETTLED_AT } from './model.js'
+import { checkNode, newId, SETTLED_AT, realDate } from './model.js'
 import { anchorFor } from './propagate.js'
 import { logger } from '../logger.service.js'
 
@@ -89,7 +89,6 @@ const majority = (xs) => {
     for (const [k, v] of c) if (v > n) { best = k; n = v }
     return n * 2 > xs.length ? JSON.parse(best) : null
 }
-const realDate = (d) => typeof d === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(d) && new Date(`${d}T00:00:00Z`).toISOString?.().slice(0, 10) === d
 
 /** The uncertainty of a node's numbers: entropy over the maximum for its option count, 0–1. Pure. */
 export function uncertainty(ps) {
@@ -235,4 +234,55 @@ export async function buildNetwork(state, questions) {
     if (runs.length < 2) return { ok: false, reason: `only ${runs.length} of ${RUNS} network runs answered`, cost_usd: cost }
     const combined = combineRuns(runs, questions, state.as_of)
     return { ok: true, ...assemble(questions, combined, state.as_of), cost_usd: cost, runs: runs.length }
+}
+
+// ─── links for NEW nodes (code review 2026-11-23, Roy's "fix all"): an update or a rebuild that adds a question used to
+// leave it with no links, so it never took part in spreading. One call, only for the new nodes. ───────────────────────
+
+export const LINKS_EFFORT = 'medium'
+export const LINKS_SYSTEM = 'You link NEW questions into the house\'s situation network: questions about what happens next, each with options. '
+    + 'Give only the LINKS that start or end on a question marked NEW: where one question\'s option, if it happens, makes an option of '
+    + 'ANOTHER question more or less likely — a direct channel only, with its direction (raises / lowers), strength (small / medium / '
+    + 'large), lag in days and why in one sentence. Not every pair is linked; none is fine. Answer in the JSON schema.'
+
+export function linksSchema() {
+    return { type: 'object', additionalProperties: false, required: ['links'], properties: { links: networkSchema().properties.links } }
+}
+
+/** The live nodes numbered, the new ones marked NEW. Pure. */
+export function linksPrompt(nodes, newIds) {
+    const fresh = new Set(newIds)
+    return [`THE QUESTIONS (${nodes.length}):`,
+        ...nodes.map((n, i) => `${i + 1}. ${fresh.has(n.node_id) ? 'NEW ' : ''}[${n.tree}] ${n.question}\n   options: ${n.options.map(o => `${o.key} = ${o.label}`).join('; ')}`),
+        '', 'Give the links that start or end on a NEW question.'].join('\n')
+}
+
+/**
+ * The links for `newIds` among the live `nodes` → `{ ok, links, cost_usd }`: each link from or to a new node, between two
+ * different live nodes, on options that exist, its strength as a log-odds shift. Never throws.
+ */
+export async function linksFor(nodes, newIds) {
+    const live = nodes.filter(n => n.status === 'live')
+    if (!newIds?.length || live.length < 2) return { ok: true, links: [], cost_usd: 0 }
+    let cost = 0, payer = null
+    try { payer = await _io.payer() } catch { /* unbooked */ }
+    try {
+        const res = await _io.call({ model: NETWORK_MODEL, effort: LINKS_EFFORT, systemPrompt: LINKS_SYSTEM, user: linksPrompt(live, newIds), schema: linksSchema(),
+            onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
+        const fresh = new Set(newIds)
+        const at = (k) => live[k - 1]
+        const links = []
+        for (const l of res?.data?.links ?? []) {
+            const f = at(l.from?.question), t = at(l.to?.question)
+            if (!f || !t || f.node_id === t.node_id || !(fresh.has(f.node_id) || fresh.has(t.node_id))) continue
+            if (!f.options.some(o => o.key === l.from.option) || !t.options.some(o => o.key === l.to.option)) continue
+            const shift = (STRENGTH_SHIFT[l.strength] ?? STRENGTH_SHIFT.small) * (l.direction === 'lowers' ? -1 : 1)
+            const lag = Number.isInteger(l.lag_days?.min) && Number.isInteger(l.lag_days?.max) && l.lag_days.min >= 0 && l.lag_days.min <= l.lag_days.max ? l.lag_days : null
+            links.push({ link_id: newId('link'), from: { node_id: f.node_id, option: l.from.option }, to: { node_id: t.node_id, option: l.to.option }, shift, lag, why: l.why ?? null, live: true })
+        }
+        return { ok: true, links, cost_usd: cost }
+    } catch (err) {
+        logger.warn(LOG, 'the links call failed', { error: err.message })
+        return { ok: false, links: [], cost_usd: cost }
+    }
 }

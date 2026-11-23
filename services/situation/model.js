@@ -33,10 +33,17 @@ export const MIN_OPTIONS = 2
 export const MAX_OPTIONS = 4
 
 const DATE = /^\d{4}-\d{2}-\d{2}$/
-const KEY = /^[a-z0-9_]{1,40}$/
+/** An option key: lower_snake, 1–40. */
+export const KEY = /^[a-z0-9_]{1,40}$/
+/** Any text → a lower_snake key (the model's "Imposed, then paused" → imposed_then_paused). Pure. */
+export const snake = (s) => String(s ?? '').toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, '').slice(0, 40)
 const text = (x, max) => String(x ?? '').replace(/\s+/g, ' ').trim().slice(0, max)
 const isProb = (p) => typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1
-const realDate = (d) => {
+/**
+ * A REAL calendar date, YYYY-MM-DD. The ONE check every situation module uses (code review 2026-11-23: two copies
+ * called toISOString on an Invalid Date and threw on "2027-06-00", killing a paid build). Never throws. Pure.
+ */
+export const realDate = (d) => {
     if (typeof d !== 'string' || !DATE.test(d)) return false
     const t = new Date(`${d}T00:00:00Z`)
     return !Number.isNaN(t.getTime()) && t.toISOString().slice(0, 10) === d
