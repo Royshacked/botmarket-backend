@@ -142,11 +142,11 @@ export async function eightKs(now = _deps.now()) {
     return out
 }
 
-/** The Federal Register's rules and presidential documents on the doc's policy terms. */
-export async function policy(now = _deps.now()) {
+/** The Federal Register's rules and presidential documents on the doc's policy terms (`days` back; the situation network reads a week). */
+export async function policy(now = _deps.now(), { days = LOOKBACK_DAYS } = {}) {
     const out = [], seen = new Set()
     for (const term of POLICY_TERMS) {
-        const p = new URLSearchParams({ 'conditions[publication_date][gte]': daysAgo(now, LOOKBACK_DAYS), 'conditions[term]': term, per_page: '20', order: 'newest' })
+        const p = new URLSearchParams({ 'conditions[publication_date][gte]': daysAgo(now, days), 'conditions[term]': term, per_page: '20', order: 'newest' })
         for (const t of ['RULE', 'PRESDOCU']) p.append('conditions[type][]', t)
         let j
         try { j = await _deps.http(`https://www.federalregister.gov/api/v1/documents.json?${p}`) } catch { continue }
@@ -226,12 +226,20 @@ export async function clinical(now = _deps.now()) {
     return out
 }
 
-/** FMP's general news — the doc's fallback, for geopolitical and supply shocks. */
-export async function news(now = _deps.now()) {
-    let rows
-    try { rows = await _deps.fmp('/news/general-latest?page=0&limit=60', { label: 'FMP general news' }) } catch { return [] }
-    const since = daysAgo(now, 1)
-    return (Array.isArray(rows) ? rows : []).filter(r => String(r.publishedDate).slice(0, 10) >= since).map(r => ({
+/**
+ * FMP's general news — the doc's fallback, for geopolitical and supply shocks. Echo reads one page of the last day; the
+ * situation network's weekly build (services/situation/news.js) reads `days` back over `pages` pages.
+ */
+export async function news(now = _deps.now(), { days = 1, pages = 1 } = {}) {
+    let rows = []
+    for (let page = 0; page < pages; page++) {
+        let got
+        try { got = await _deps.fmp(`/news/general-latest?page=${page}&limit=60`, { label: 'FMP general news' }) } catch { if (page === 0) return []; break }
+        if (!Array.isArray(got) || !got.length) break
+        rows = rows.concat(got)
+    }
+    const since = daysAgo(now, days)
+    return rows.filter(r => String(r.publishedDate).slice(0, 10) >= since).map(r => ({
         key: `news|${r.url ?? r.title}`, source: 'news', date: String(r.publishedDate).slice(0, 10), tickers: [],
         title: r.title, text: clip(r.text, 600), url: r.url ?? null, hint: null,
     }))
