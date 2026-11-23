@@ -1267,6 +1267,10 @@ services/
   situation/news.js         the dated feed (fetchNews → articles + gaps): Echo's intake readers (Federal Register policy
                             with a `days` window, FMP general news over pages, capped FMP_PER_DAY; Defense awards) + GNews
                             on GNEWS_TOPICS; deduped, nothing after asOf, newest first; articleLines numbers them for citing.
+  situation/state.js        buildState(asOf): data + news → ONE structured Opus 5.5 call (prompts/situation_state.md) for
+                            the reading sections (regime readings, policy, money, stories, calendar) and 15–35 open
+                            questions; shapeAnswer (sources from cited articles, an uncited FACT dropped, dates clamped,
+                            questions tidied, ≤ MAX_QUESTIONS); checkState; cost_usd measured (first live build $0.37).
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)
