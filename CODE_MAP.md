@@ -1259,6 +1259,11 @@ services/
                             shift ≤ 3), checkDropped (counts add up), checkIndustry, checkForecast, checkOutside, checkRun.
   situation/store.js        `situation_*` collections (runs, states, nodes, links, dropped, industries, forecasts, outside):
                             saveRun writes a run whole then marks it complete; latestRun / readRun read complete runs only.
+  situation/state.data.js   the state's four DATA sections by code (buildDataSections → sections + numbers + gaps): regime
+                            (FRED fetchSeries: level, 3-month direction, yoy / q-o-q annualised / monthly change), prices
+                            (S&P from the engine window, indices/gold/BTC from FMP, breadth, every industry_index basket vs
+                            the S&P: 1/3/12m, 50/200-day, Q9 stretch), money (capex leaders, 13F flows, insider clusters),
+                            calendar (FOMC + high-impact releases, the index movers' earnings). A failed leg is a named gap.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
   manualNotify.service.js   broker-less entry/exit FillCards → social chat (embedded price/qty confirm)

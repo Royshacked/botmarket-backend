@@ -304,3 +304,18 @@ export async function fetchMacroCatalystDates({ backDays = 60 } = {}) {
     const events = await fetchFedEvents({ days: 1, backDays }).catch(() => [])
     return [...new Set(events.filter(e => e?.kind === 'fomc' || e?.impact === 'high').map(e => e.date))].sort()
 }
+
+/**
+ * One FRED series' observations from `from` (YYYY-MM-DD) → `[{ date, value }]`, oldest first, FRED's '.' (no print)
+ * dropped. Throws on a failed request (the caller decides what a missing series means); [] without FRED_API_KEY.
+ * The situation network's regime section reads levels and directions from it (services/situation/state.data.js).
+ */
+export async function fetchSeries(seriesId, { from } = {}) {
+    if (!FRED_API_KEY) return []
+    const url = `${BASE}/series/observations?series_id=${encodeURIComponent(seriesId)}&api_key=${FRED_API_KEY}`
+              + `&file_type=json&sort_order=asc${from ? `&observation_start=${from}` : ''}`
+    const data = await getJson(url, { label: 'FRED /series/observations (range)' })
+    return (data?.observations ?? [])
+        .map(o => ({ date: o?.date, value: Number(o?.value) }))
+        .filter(o => o.date && Number.isFinite(o.value) && o.value !== null && String(o.value) !== '')
+}
