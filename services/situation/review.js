@@ -11,6 +11,8 @@ import { readRun, latestRun, saveRun, getBusy } from './store.js'
 import { anchorFor, propagate } from './propagate.js'
 import { scoreIndustries, wouldBeEntries } from './industries.js'
 import { effectsFromNodes } from './build.js'
+import { withMacroScores } from './layers.js'
+import { layerOf, originOf, layerName } from './sectors.js'
 import { canSeeSituation } from './access.js'
 import { logger } from '../logger.service.js'
 
@@ -26,22 +28,25 @@ export function _setIO(io) { Object.assign(_io, io) }
 
 const pct = (p) => `${Math.round(p * 100)}%`
 const opts = (n) => n.options.map(o => `${o.label} ${pct(o.p)}`).join(' / ')
+/** A sector question says its sector (layers §2); a macro one says nothing. */
+const where = (n) => (layerOf(n) === 'macro' ? '' : `[${layerName(layerOf(n))}] `)
 
 /** The card's lines for a run. The first build lists every open node. Pure. */
 export function cardLines(run) {
     const nodes = new Map((run.nodes ?? []).map(n => [n.node_id, n]))
     const lines = []
-    if (run.run.kind === 'build') {
-        for (const n of run.nodes.filter(x => x.kind === 'open' && x.status === 'live')) lines.push(`• ${n.question} — ${opts(n)}`)
-        return { title: `The situation network is built (${run.run.as_of}): ${lines.length} open questions to review`, lines }
+    if (run.run.kind === 'build' || run.run.kind === 'sectors') {
+        const sectorsOnly = run.run.kind === 'sectors'
+        for (const n of run.nodes.filter(x => x.kind === 'open' && x.status === 'live' && (!sectorsOnly || layerOf(x) !== 'macro'))) lines.push(`• ${where(n)}${n.question} — ${opts(n)}`)
+        return { title: sectorsOnly ? `The sector layer is built (${run.run.as_of}): ${lines.length} open sector questions to review` : `The situation network is built (${run.run.as_of}): ${lines.length} open questions to review`, lines }
     }
-    const label = { moved: 'moved', drift: 'drifted since your last review', new: 'new', woken: 'EARLY WARNING — a dormant branch woke', resolved: 'resolved' }
+    const label = { moved: 'moved', drift: 'drifted since your last review', new: 'new', woken: 'EARLY WARNING — a dormant branch woke', resolved: 'resolved', promoted: 'moved up to the macro layer' }
     for (const it of run.run.stats?.review ?? []) {
         const n = nodes.get(it.node_id)
         if (!n) continue
-        if (it.why === 'resolved') lines.push(`• Resolved: ${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option}`)
-        else if (it.why === 'woken') lines.push(`• ${label.woken}: ${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option} (${pct(n.options.find(o => o.key === it.option)?.p ?? 0)})`)
-        else lines.push(`• ${n.question} (${label[it.why]}${it.by ? `, ${Math.round(it.by * 100)} pts` : ''}) — ${opts(n)}`)
+        if (it.why === 'resolved') lines.push(`• Resolved: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option}`)
+        else if (it.why === 'woken') lines.push(`• ${label.woken}: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option} (${pct(n.options.find(o => o.key === it.option)?.p ?? 0)})`)
+        else lines.push(`• ${where(n)}${n.question} (${label[it.why] ?? it.why}${it.by ? `, ${Math.round(it.by * 100)} pts` : ''}) — ${opts(n)}`)
     }
     const kind = run.run.kind === 'event' ? `Event update: ${run.run.trigger}` : run.run.kind === 'rebuild' ? 'Monthly rebuild' : 'Weekly update'
     return { title: `${kind} (${run.run.as_of}): ${lines.length ? `${lines.length} to review` : 'nothing past your review line'}`, lines }
@@ -93,15 +98,16 @@ export async function overrideNode(node_id, p, userId) {
     nodes = nodes.map(x => (x.node_id === node_id ? { ...x, anchor: anchorFor(nodes, prev.links, node_id, asOf) } : x))
     const spread = propagate(nodes, prev.links)
     const inds = (prev.industries ?? []).map(r => ({ code: r.code, name: r.name, level: r.level }))
-    const industries = scoreIndustries(spread.nodes, prev.links, effectsFromNodes(spread.nodes), inds)
-    const forecasts = n.options.map((o, i) => ({ node_id, option: o.key, p: xs[i] / sum, set_by: 'roy', llm_p: o.p, resolve_by: n.resolve_by }))
+    const effects = effectsFromNodes(spread.nodes)
+    const industries = withMacroScores(scoreIndustries(spread.nodes, prev.links, effects, inds), spread.nodes, prev.links, effects, inds)
+    const forecasts = n.options.map((o, i) => ({ node_id, option: o.key, p: xs[i] / sum, set_by: 'roy', llm_p: o.p, resolve_by: n.resolve_by, layer: originOf(n) }))
     // The network must still be where this override started from.
     if ((await _io.latest())?.run_id !== head.run_id) return { ok: false, reason: 'the network changed meanwhile — open it again and re-enter your numbers' }
     const saved = await _io.save({
         run: { kind: 'event', as_of: asOf, trigger: "Roy's override", parent_run_id: head.run_id },
-        state: prev.state ? { ...prev.state, as_of: asOf } : null, nodes: spread.nodes, links: prev.links, dropped: prev.dropped, industries, forecasts,
+        state: prev.state ? { ...prev.state, as_of: asOf } : null, sector_states: prev.sector_states ?? [], nodes: spread.nodes, links: prev.links, dropped: prev.dropped, industries, forecasts,
         stats: { cost_usd: 0, override: { node_id, by: String(userId), llm: Object.fromEntries(n.options.map(o => [o.key, o.p])) }, changes: spread.changes, rounds: spread.rounds,
-            review: [], entries: wouldBeEntries(prev.industries, industries, asOf) },
+            review: [], entries: wouldBeEntries(prev.industries, industries, asOf), sectors: prev.run?.stats?.sectors ?? null },
     })
     return saved.ok ? { ok: true, run_id: saved.run_id, changes: spread.changes.length } : saved
 }

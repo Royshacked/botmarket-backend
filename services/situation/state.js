@@ -148,3 +148,42 @@ export async function buildState(asOf = new Date().toISOString().slice(0, 10)) {
     if (!checked.ok) return { ok: false, reason: `the state did not pass its check: ${checked.reason}`, gaps, cost_usd: cost }
     return { ok: true, state: checked.value, questions: shaped.questions, numbers: data.numbers, gaps, cost_usd: cost, dropped: shaped.dropped, model: res.model }
 }
+
+// ─── THE WEEKLY REWRITE (situation-network-layers.md, Roy 2026-11-23: "a real fix, not a plaster"). The description was
+// written once a month while the network moved every week: new questions from updates and promoted sector questions had
+// no story behind them in it. Every weekly update now rewrites the model's sections from the week's news AND the live
+// questions' own reasoning, so whatever the network treats as macro is in the macro picture. ───────────────────────────
+
+export const REWRITE_NOTE = '\n\nTHIS IS THE WEEKLY REWRITE of an existing state. Write the SECTIONS only and send `questions: []`. You are also given '
+    + "the network's LIVE QUESTIONS with their reasoning: every story a question rests on must be described in the sections — from the "
+    + 'articles where they cover it (cite them), otherwise as a reading of the question\'s reasoning.'
+
+/** The live questions as evidence lines for a rewrite. Pure. */
+export function questionLines(nodes = []) {
+    return nodes.map((n, i) => `Q${i + 1}. ${n.question} — ${n.options.map(o => `${o.label} ${Math.round(o.p * 100)}%`).join(' / ')}${n.reasoning ? `\n    reasoning: ${String(n.reasoning).slice(0, 600)}` : ''}`).join('\n')
+}
+
+/**
+ * Rewrite the macro state's MODEL sections for `asOf` from the code's fresh data sections, the week's articles and the
+ * live macro questions → `{ ok: true, state, cost_usd }` (a checked state: the code's sections + the new readings) or
+ * `{ ok: false, reason, cost_usd }`. Never throws.
+ */
+export async function rewriteState(asOf, { data, articles = [], gaps = [], questions = [] }) {
+    let cost = 0, payer = null
+    try { payer = await _io.payer() } catch { /* unbooked */ }
+    const user = `${statePrompt(asOf, data.sections, articles, gaps)}\n\nTHE NETWORK'S LIVE QUESTIONS (${questions.length}; describe what they rest on):\n${questionLines(questions)}`
+    let res
+    try {
+        res = await _io.call({ model: STATE_MODEL, effort: STATE_EFFORT, systemPrompt: _io.system() + REWRITE_NOTE, user, schema: stateSchema(),
+            onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
+    } catch (err) {
+        return { ok: false, reason: `the rewrite call failed: ${err.message}`, cost_usd: cost }
+    }
+    if (!res?.data) return { ok: false, reason: 'the rewrite call returned no answer', cost_usd: cost }
+    const shaped = shapeAnswer({ ...res.data, questions: [] }, asOf, articles)
+    const sections = Object.fromEntries(SECTIONS.map(s => [s, []]))
+    for (const s of ['regime', 'prices', 'money', 'calendar']) sections[s].push(...(data.sections[s] ?? []))
+    for (const s of WRITTEN) sections[s].push(...shaped.sections[s])
+    const checked = checkState({ as_of: asOf, sections, articles })
+    return checked.ok ? { ok: true, state: checked.value, cost_usd: cost } : { ok: false, reason: `the rewritten state did not pass its check: ${checked.reason}`, cost_usd: cost }
+}

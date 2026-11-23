@@ -14,15 +14,18 @@ import { makeToolHandler } from '../agentUtils.js'
 import { latestRun, readRun } from '../situation/store.js'
 import { buildScorecard } from '../situation/scorecard.js'
 import { canSeeSituation } from '../situation/access.js'
+import { layerOf, layerName, MACRO } from '../situation/sectors.js'
 
 const LOG = '[situationTool]'
 
 export const SITUATION_TOOL_SPEC = {
-    get_situation: `The house's SITUATION NETWORK — the current state of the world grown into a network of what could happen next, with probabilities, and which US industries the possible futures favour (summed over every path; a split industry gets no call). \`view\`: "summary" (default: the industry calls, early warnings, the open questions and their numbers, what the last update decided), "industry" with \`name\` (one industry's chances and the branches behind them), "question" with \`name\` (words from the question: its options, numbers, reasoning and links), "scorecard" (the forward test against its declared pass rule). It is a FORWARD TEST, untested: say so, and never turn a call into advice to buy or sell. Say the numbers as the network's, with its date.`,
+    get_situation: `The house's SITUATION NETWORK — the current state of the world (a macro layer, and a layer per sector under it) grown into a network of what could happen next, with probabilities, and which US industries the possible futures favour (summed over every path; a split industry gets no call). \`view\`: "summary" (default: the industry calls, early warnings, the open questions and their numbers, what the last update decided), "industry" with \`name\` (one industry's chances and the branches behind them), "question" with \`name\` (words from the question: its options, numbers, reasoning and links), "scorecard" (the forward test against its declared pass rule). It is a FORWARD TEST, untested: say so, and never turn a call into advice to buy or sell. Say the numbers as the network's, with its date.`,
 }
 
 const pct = (p) => (typeof p === 'number' ? `${Math.round(p * 100)}%` : 'n/a')
 const opts = (n) => n.options.map(o => `${o.label} ${pct(o.p)}${o.dormant ? ' (dormant)' : ''}`).join(' / ')
+/** A sector question names its sector (situation-network-layers.md §2). */
+const where = (n) => (layerOf(n) === MACRO ? '' : `[${layerName(layerOf(n))}] `)
 
 /** The summary view. Pure. */
 export function formatSummary(run) {
@@ -35,8 +38,8 @@ export function formatSummary(run) {
         `INDUSTRY CALLS (≥ 60% over every path): ${calls.length ? calls.map(r => `${r.name} ${r.p_win >= 0.6 ? `wins ${pct(r.p_win)}` : `loses ${pct(r.p_lose)}`}`).join('; ') : 'none — no industry is that one-sided'}`,
         warn.length ? `EARLY WARNINGS (a dormant branch woke; shown beside the scores, not in them): ${warn.map(w => `${w.question} → ${w.label} (${pct(w.p)})`).join('; ')}` : null,
         `OPEN QUESTIONS (${live.filter(n => n.kind === 'open').length}):`,
-        ...live.filter(n => n.kind === 'open').map(n => `- ${n.question} — ${opts(n)}`),
-        `SETTLED (${live.filter(n => n.kind === 'settled').length}): ${live.filter(n => n.kind === 'settled').map(n => `${n.question} — ${opts(n)}`).join('; ') || 'none'}`,
+        ...live.filter(n => n.kind === 'open').map(n => `- ${where(n)}${n.question} — ${opts(n)}`),
+        `SETTLED (${live.filter(n => n.kind === 'settled').length}): ${live.filter(n => n.kind === 'settled').map(n => `${where(n)}${n.question} — ${opts(n)}`).join('; ') || 'none'}`,
         dec.length ? `THE LAST UPDATE DECIDED: ${dec.map(d => `${d.decision.replace('_', ' ')}: ${d.summary}`).join(' | ')}` : null,
     ].filter(Boolean).join('\n')
 }
@@ -52,6 +55,7 @@ export function formatIndustry(run, name) {
     const why = (p) => nodes.get(p.node_id)?.options.find(o => o.key === p.option)?.effects?.find(e => e.code === r.code)?.why ?? null
     return [
         `${r.name} (${run.run.as_of}): wins ${pct(r.p_win)}, loses ${pct(r.p_lose)} over every path; size ${r.bucket}; ${r.agreement != null ? `${pct(r.agreement)} of the paths that move it agree` : 'no path moves it'}.`,
+        r.macro ? `The macro layer alone: wins ${pct(r.macro.p_win)}, loses ${pct(r.macro.p_lose)} (the rest is the sector layer).` : null,
         'BEHIND IT (the branches that move it most):',
         ...r.paths.map(p => `- "${p.question}" → ${p.label}: ${p.weight >= 0 ? 'helps' : 'hurts'}${why(p) ? ` — ${why(p)}` : ''}`),
         (r.early_warning ?? []).length ? `EARLY WARNING: ${r.early_warning.map(w => `${nodes.get(w.node_id)?.question} → ${w.option} would ${w.direction === 'up' ? 'help' : 'hurt'} it`).join('; ')}` : null,
@@ -68,7 +72,7 @@ export function formatQuestion(run, name) {
     const into = run.links.filter(l => l.to.node_id === n.node_id).map(l => `${run.nodes.find(x => x.node_id === l.from.node_id)?.question ?? '?'} → ${l.from.option} ${l.shift > 0 ? 'raises' : 'lowers'} ${l.to.option}`)
     const outOf = run.links.filter(l => l.from.node_id === n.node_id).map(l => `${n.options.find(o => o.key === l.from.option)?.label ?? l.from.option} ${l.shift > 0 ? 'raises' : 'lowers'} "${run.nodes.find(x => x.node_id === l.to.node_id)?.question ?? '?'}" → ${l.to.option}`)
     return [
-        `${n.question} (${n.status}, ${n.kind}; resolve by ${n.resolve_by ?? 'n/a'}; set by ${n.set_by}): ${opts(n)}`,
+        `${where(n)}${n.question} (${n.status}, ${n.kind}; resolve by ${n.resolve_by ?? 'n/a'}; set by ${n.set_by}): ${opts(n)}`,
         n.status === 'resolved' ? `RESOLVED: ${n.resolved.option} — ${n.resolved.evidence}` : null,
         n.reasoning ? `REASONING: ${n.reasoning}` : null,
         ...n.options.filter(o => o.dormant).map(o => `SIGNPOST for "${o.label}": ${o.signpost}`),
@@ -83,9 +87,10 @@ export function formatScorecard(s) {
     return [
         `FORWARD TEST since ${s.started_on ?? 'not started'} (${s.verdict.months} months, ${s.runs} runs). The pass rule was declared before the start.`,
         `Questions resolved: ${n.questions} (needs ${100}). Brier ${n.brier?.toFixed(3) ?? 'n/a'} vs equal odds ${n.equal_odds?.toFixed(3) ?? 'n/a'}.`,
-        `Industry long − short at 6 months: ${s.industries.m6.n} dates, mean ${s.industries.m6.mean == null ? 'n/a' : pct(s.industries.m6.mean)}, t ${s.industries.m6.t?.toFixed(1) ?? 'n/a'}. The plain question (control): ${s.control.m6.mean == null ? 'n/a' : pct(s.control.m6.mean)}.`,
+        `Industry long − short at 6 months: ${s.industries.m6.n} dates, mean ${s.industries.m6.mean == null ? 'n/a' : pct(s.industries.m6.mean)}, t ${s.industries.m6.t?.toFixed(1) ?? 'n/a'}. The macro layer alone: ${s.macro_only?.m6?.mean == null ? 'n/a' : pct(s.macro_only.m6.mean)}. The plain question (control): ${s.control.m6.mean == null ? 'n/a' : pct(s.control.m6.mean)}.`,
+        s.layers ? `By layer: macro ${s.layers.macro.questions} resolved (Brier ${s.layers.macro.brier?.toFixed(3) ?? 'n/a'}), sectors ${s.layers.sectors.questions} resolved (Brier ${s.layers.sectors.brier?.toFixed(3) ?? 'n/a'}).` : null,
         `Checks: ${Object.entries(s.verdict.checks).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v ? '✓' : '✗'}`).join('; ')}. ${s.verdict.pass ? 'PASSED.' : 'Not passed.'}`,
-    ].join('\n')
+    ].filter(Boolean).join('\n')
 }
 
 const _deps = { latest: () => latestRun(), read: (id) => readRun(id), scorecard: () => buildScorecard() }

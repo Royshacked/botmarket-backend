@@ -8,12 +8,12 @@
 // on Render only.
 
 import { getDb } from '../../providers/mongodb.provider.js'
-import { checkRun, checkState, checkNode, checkLink, checkDropped, checkIndustry, checkForecast, checkOutside } from './model.js'
+import { checkRun, checkState, checkSectorState, checkNode, checkLink, checkDropped, checkIndustry, checkForecast, checkOutside } from './model.js'
 
 export const COLLECTIONS = Object.freeze({
     runs: 'situation_runs', states: 'situation_states', nodes: 'situation_nodes', links: 'situation_links',
     dropped: 'situation_dropped', industries: 'situation_industries', forecasts: 'situation_forecasts',
-    outside: 'situation_outside',
+    outside: 'situation_outside', sectorStates: 'situation_sector_states',
 })
 
 const _deps = { db: () => getDb(), now: () => new Date().toISOString() }
@@ -36,6 +36,7 @@ async function _ensureIndexes(db) {
     await c('forecasts').createIndex({ forecast_id: 1 }, { unique: true })
     await c('forecasts').createIndex({ outcome: 1, resolve_by: 1 })
     await c('outside').createIndex({ event_id: 1 }, { unique: true })
+    await c('sectorStates').createIndex({ run_id: 1, sector: 1 }, { unique: true })
     _indexed = true
 }
 
@@ -48,6 +49,14 @@ export function checkBundle(bundle = {}) {
         const s = checkState(bundle.state)
         if (!s.ok) return { ok: false, reason: `state: ${s.reason}` }
         out.state = s.value
+    }
+    // The sector layer's states (situation-network-layers.md §4.2), one per sector.
+    out.sector_states = []
+    for (const s of bundle.sector_states ?? []) {
+        const c = checkSectorState(s)
+        if (!c.ok) return { ok: false, reason: `sector state: ${c.reason}` }
+        if (out.sector_states.some(x => x.sector === c.value.sector)) return { ok: false, reason: `sector state: two for sector ${c.value.sector}` }
+        out.sector_states.push(c.value)
     }
     out.nodes = []
     for (const n of bundle.nodes ?? []) {
@@ -117,6 +126,7 @@ export async function saveRun(bundle, deps = _deps) {
     const c = (k) => db.collection(COLLECTIONS[k])
     await c('runs').insertOne({ ...b.run, complete: false, started_at: deps.now(), finished_at: null })
     if (b.state) await c('states').insertOne({ ...b.state, run_id })
+    if (b.sector_states.length) await c('sectorStates').insertMany(stamp(b.sector_states))
     if (b.nodes.length) await c('nodes').insertMany(stamp(b.nodes))
     if (b.links.length) await c('links').insertMany(stamp(b.links))
     if (b.dropped) await c('dropped').insertOne({ ...b.dropped, run_id })
@@ -142,11 +152,12 @@ export async function readRun(run_id, deps = _deps) {
     const run = await c('runs').findOne({ run_id, complete: true }, { projection: { _id: 0 } })
     if (!run) return null
     const p = { projection: { _id: 0 } }
-    const [state, nodes, links, dropped, industries, outside] = await Promise.all([
+    const [state, nodes, links, dropped, industries, outside, sector_states] = await Promise.all([
         c('states').findOne({ run_id }, p), c('nodes').find({ run_id }, p).toArray(), c('links').find({ run_id }, p).toArray(),
         c('dropped').findOne({ run_id }, p), c('industries').find({ run_id }, p).toArray(), c('outside').find({ run_id }, p).toArray(),
+        c('sectorStates').find({ run_id }, p).sort({ sector: 1 }).toArray(),
     ])
-    return { run, state, nodes, links, dropped, industries, outside }
+    return { run, state, nodes, links, dropped, industries, outside, sector_states }
 }
 
 /**

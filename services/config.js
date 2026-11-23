@@ -253,6 +253,9 @@ export const config = {
     // The weekly LLM budget (Roy's call 4, set once one build was measured: the full build $1.86, an update about $0.5).
     // Past it, event updates wait for the weekly run; the weekly run and the monthly rebuild always go.
     get situationWeeklyUsd()   { return _num('SITUATION_WEEKLY_USD', 10) },
+    // The SECTOR LAYER under the macro one (docs/design/situation-network-layers.md, Roy 2026-11-23): on with the
+    // network; SITUATION_SECTORS=off runs the macro layer alone.
+    get situationSectors()     { return _bool('SITUATION_SECTORS', 'off-switch') },
     get situationUsers() {
         const raw = _raw('SITUATION_USERS') ?? ''
         return raw.split(',').map(s => s.trim()).filter(Boolean)

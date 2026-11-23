@@ -8,8 +8,8 @@ const node = (node_id, opts, over = {}) => ({ node_id, tree: 't', question: `Q $
 
 test('linksPrompt marks the new questions', () => {
     const p = linksPrompt([node('a', { x: 0.5, y: 0.5 }), node('b', { x: 0.5, y: 0.5 })], ['b'])
-    assert.match(p, /1\. \[t\] Q a\?/)
-    assert.match(p, /2\. NEW \[t\] Q b\?/)
+    assert.match(p, /1\. \[Macro · t\] Q a\?/)
+    assert.match(p, /2\. NEW \[Macro · t\] Q b\?/)
 })
 
 test('linksFor: only links touching a new node, between real options of two live nodes', async () => {

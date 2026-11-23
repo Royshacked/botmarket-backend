@@ -16,7 +16,10 @@ import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { echoIntakeService } from '../echoIntake.service.js'
 import { toArticle, mergeArticles, articleLines } from './news.js'
-import { buildFull } from './build.js'
+import { buildFull, buildSectors } from './build.js'
+import { buildSectorStates } from './layers.js'
+import { fetchSectorNews } from './news.js'
+import { SECTORS, SECTOR_CODES, MACRO, layerOf, layerName, topNames } from './sectors.js'
 import { buildState } from './state.js'
 import { runUpdate, numbered } from './update.js'
 import { latestRun, readRun, COLLECTIONS, setBusy, clearBusy } from './store.js'
@@ -40,6 +43,14 @@ const _io = {
     db: () => getDb(),
     latest: () => latestRun(), read: (id) => readRun(id),
     build: (o) => buildFull(o), state: (asOf) => buildState(asOf), update: (o) => runUpdate(o),
+    sectors: (o) => buildSectors(o), sectorStates: (o) => buildSectorStates(o), sectorsOn: () => config.situationSectors,
+    // The watcher's look at each sector: its Federal Register terms and its largest names' FMP news; no GNews.
+    sectorNews: async (now) => {
+        const names = await topNames().catch(() => new Map())
+        const out = []
+        for (const x of SECTORS) out.push(...(await fetchSectorNews(x, { days: 1, asOf: now.toISOString().slice(0, 10), names: names.get(x.code) ?? [], gnews: false })).articles)
+        return out
+    },
     policy: (now) => echoIntakeService.policy(now, { days: 1 }), fmpNews: (now) => echoIntakeService.news(now, { days: 1, pages: 2 }),
     call: (args) => callAnthropicStructured(args),
     record: (payer, model, usage) => recordUsage(payer, model, usage, 'situation', { monitor: true }),
@@ -56,12 +67,13 @@ const day = (d) => d.toISOString().slice(0, 10)
 const daysBetween = (a, b) => Math.round((Date.parse(`${b}T00:00:00Z`) - Date.parse(`${a}T00:00:00Z`)) / 864e5)
 
 /**
- * What is due → 'build' | 'rebuild' | 'weekly' | 'watch'. The weekly clock runs from the last SCHEDULED run (build,
- * rebuild or weekly), never from an event update or an override — those would push the week back indefinitely (code
- * review 2026-11-23). Pure.
+ * What is due → 'build' | 'sectors' | 'rebuild' | 'weekly' | 'watch'. The weekly clock runs from the last SCHEDULED run
+ * (build, rebuild, weekly or sectors), never from an event update or an override — those would push the week back
+ * indefinitely (code review 2026-11-23). A network with no sector layer gets one (`needsSectors`). Pure.
  */
-export function dueKind(head, lastBuildAsOf, today, lastScheduledAsOf = head?.as_of ?? null) {
+export function dueKind(head, lastBuildAsOf, today, lastScheduledAsOf = head?.as_of ?? null, needsSectors = false) {
     if (!head) return 'build'
+    if (needsSectors) return 'sectors'
     if (lastBuildAsOf && daysBetween(lastBuildAsOf, today) >= REBUILD_DAYS) return 'rebuild'
     if (daysBetween(lastScheduledAsOf ?? head.as_of, today) >= WEEKLY_DAYS) return 'weekly'
     return 'watch'
@@ -78,18 +90,28 @@ export function backingOff(failed, kind, now) {
 }
 
 export function triageSchema() {
-    return { type: 'object', additionalProperties: false, required: ['material', 'why', 'articles'],
-        properties: { material: { type: 'boolean' }, why: { type: 'string' }, articles: { type: 'array', items: { type: 'integer' } } } }
+    return { type: 'object', additionalProperties: false, required: ['material', 'why', 'articles', 'layers'],
+        properties: { material: { type: 'boolean' }, why: { type: 'string' }, articles: { type: 'array', items: { type: 'integer' } },
+            layers: { type: 'array', items: { type: 'string', enum: [MACRO, ...SECTOR_CODES] } } } }
+}
+
+/** The triage's layers → the event update's: known layers only, each once; none named → the macro layer. Pure. */
+export function eventLayers(xs) {
+    const out = [...new Set((xs ?? []).filter(x => x === MACRO || SECTOR_CODES.includes(x)))]
+    return out.length ? out : [MACRO]
 }
 
 export const TRIAGE_SYSTEM = 'You watch the news for the house\'s situation network: a set of open questions about what happens next, each with '
     + 'options, some of them dormant with a signpost. Decide ONE thing: does any of these articles MATERIALLY change a question '
     + '(settles it, shifts its odds clearly, opens an outcome it lacks) or fire a dormant signpost? Routine news, opinion, recaps and '
-    + 'small moves are not material — they wait for the weekly update. Answer in the JSON schema; cite the article numbers.'
+    + 'small moves are not material — they wait for the weekly update. The questions belong to LAYERS — macro, or a sector code '
+    + '(GICS: 10 Energy, 15 Materials, 20 Industrials, 25 Consumer Discretionary, 30 Consumer Staples, 35 Health Care, 40 Financials, '
+    + '45 Information Technology, 50 Communication Services, 55 Utilities, 60 Real Estate). When material, name every layer the news '
+    + 'touches in `layers` (a sector also when the news opens a question that sector lacks). Answer in the JSON schema; cite the article numbers.'
 
 export function triagePrompt(list, articles) {
     return [`THE LIVE QUESTIONS (${list.length}):`,
-        ...list.map(({ n, node }) => `${n}. ${node.question} — ${node.options.map(o => `${o.label} ${Math.round(o.p * 100)}%${o.dormant ? ` (dormant: ${o.signpost})` : ''}`).join('; ')}`),
+        ...list.map(({ n, node }) => `${n}. [${layerOf(node) === MACRO ? 'macro' : `${layerOf(node)} ${layerName(layerOf(node))}`}] ${node.question} — ${node.options.map(o => `${o.label} ${Math.round(o.p * 100)}%${o.dormant ? ` (dormant: ${o.signpost})` : ''}`).join('; ')}`),
         '', `THE ARTICLES (${articles.length}):`, articleLines(articles)].join('\n')
 }
 
@@ -116,9 +138,13 @@ export async function tick() {
         const runs = db.collection(COLLECTIONS.runs)
         const latestOf = (kinds) => runs.find({ complete: true, kind: { $in: kinds } }, { projection: { as_of: 1 } }).sort({ as_of: -1 }).limit(1).next()
         const lastBuild = head ? await latestOf(['build', 'rebuild']) : null
-        const lastScheduled = head ? await latestOf(['build', 'rebuild', 'weekly']) : null
-        const kind = dueKind(head, lastBuild?.as_of ?? null, today, lastScheduled?.as_of ?? null)
+        const lastScheduled = head ? await latestOf(['build', 'rebuild', 'weekly', 'sectors']) : null
         const w = await db.collection(WATCH).findOne({ _id: 'watch' }) ?? { _id: 'watch', last_at: null, last_event_at: null, seen: [], costs: [], failed: null }
+        // The sector layer: on, and the head has no sector state → add it (situation-network-layers.md §13 step 7). While a
+        // failed attempt waits its day, the macro layer's schedule goes on rather than wait behind it.
+        const needsSectors = Boolean(head && _io.sectorsOn() && !backingOff(w.failed, 'sectors', now)
+            && !(await db.collection(COLLECTIONS.sectorStates).countDocuments({ run_id: head.run_id }, { limit: 1 })))
+        const kind = dueKind(head, lastBuild?.as_of ?? null, today, lastScheduled?.as_of ?? null, needsSectors)
         const save = (set) => db.collection(WATCH).updateOne({ _id: 'watch' }, { $set: set }, { upsert: true })
         const keepCosts = (extra) => [...(w.costs ?? []).filter(c => c.at >= new Date(now.getTime() - 8 * 864e5).toISOString()), ...extra]
         // A scheduled job, run under the busy flag (overrides wait for it), its failure recorded with its cost and backed off.
@@ -132,16 +158,22 @@ export async function tick() {
             return { did: k, ...r }
         }
         if (kind === 'build') return scheduled('build', () => _io.build({ asOf: today, kind: 'build' }))
+        if (kind === 'sectors') return scheduled('sectors', () => _io.sectors({ asOf: today }))
         if (kind === 'rebuild') return scheduled('rebuild', async () => {
             const st = await _io.state(today)
-            return st.ok ? _io.update({ kind: 'rebuild', asOf: today, fresh: st }) : { ok: false, reason: st.reason, cost_usd: st.cost_usd ?? 0 }
+            if (!st.ok) return { ok: false, reason: st.reason, cost_usd: st.cost_usd ?? 0 }
+            // The sectors' fresh states too: their questions reach the network as candidates, like the macro ones.
+            const ss = _io.sectorsOn() ? await _io.sectorStates({ asOf: today, state: st.state, rows: st.numbers?.industries ?? [] }) : { sectors: [], cost_usd: 0, gaps: [] }
+            const fresh = { ...st, cost_usd: (st.cost_usd ?? 0) + ss.cost_usd, gaps: [...(st.gaps ?? []), ...ss.gaps], sectors: ss.sectors.map(x => ({ sector: x.sector.code, state: x.state.state, questions: x.state.questions })) }
+            return _io.update({ kind: 'rebuild', asOf: today, fresh })
         })
         if (kind === 'weekly') return scheduled('weekly', () => _io.update({ kind: 'weekly', asOf: today }))
         // The watch.
         if (w.last_at && now - new Date(w.last_at) < WATCH_EVERY_MS) return { did: 'nothing' }
         const raw = [...(await _io.policy(now).catch(() => [])).map(r => toArticle(r, 'Federal Register')), ...(await _io.fmpNews(now).catch(() => [])).map(r => toArticle(r, 'FMP news'))]
+        const sectorRaw = _io.sectorsOn() ? await _io.sectorNews(now).catch(() => []) : []
         const seen = new Set(w.seen ?? [])
-        const fresh = mergeArticles([raw], today, 80).filter(a => !seen.has(a.url ?? a.title))
+        const fresh = mergeArticles([raw, sectorRaw], today, 120).filter(a => !seen.has(a.url ?? a.title))
         const keepSeen = [...seen, ...fresh.map(a => a.url ?? a.title)].slice(-1000)
         if (!fresh.length) { await save({ last_at: now.toISOString(), seen: keepSeen }); return { did: 'watch', articles: 0 } }
         const prev = await _io.read(head.run_id)
@@ -152,17 +184,19 @@ export async function tick() {
         await save({ last_at: now.toISOString(), seen: keepSeen, costs: keepCosts([{ at: now.toISOString(), usd: cost }]) })
         w.costs = keepCosts([{ at: now.toISOString(), usd: cost }])
         if (!res?.data?.material) return { did: 'watch', articles: fresh.length, material: false }
+        // The layers the news touched: an event update runs only those (the macro layer when the triage named none).
+        const layers = eventLayers(res.data.layers)
         if (w.last_event_at && now - new Date(w.last_event_at) < EVENT_MIN_GAP_MS) return { did: 'watch', material: true, waiting: 'one event update a day' }
         const spent = await spentThisWeek(db, now)
         if (spent >= _io.budget()) return { did: 'watch', material: true, waiting: `the weekly budget ($${_io.budget()}) is spent ($${spent.toFixed(2)})` }
         const trigger = String(res.data.why ?? 'material news').slice(0, 280)
         await _io.busy('event')
         let r
-        try { r = await _io.update({ kind: 'event', trigger, asOf: today }) } finally { await _io.free() }
+        try { r = await _io.update({ kind: 'event', trigger, asOf: today, layers }) } finally { await _io.free() }
         // The day's one event update is spent whether it saved or not; a failure's cost is counted.
         await save({ last_event_at: now.toISOString(), ...(r.ok ? {} : { costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: 'event' }]) }) })
         if (r.ok) await _io.card(r.run_id)
-        return { did: 'event', trigger, ...r }
+        return { did: 'event', trigger, layers, ...r }
     } catch (err) {
         logger.warn(LOG, 'tick failed', { error: err.message })
         return { did: 'error', reason: err.message }

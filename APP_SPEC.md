@@ -760,6 +760,17 @@ is deferred.
   resolved); silence accepts; an override is a new run with both numbers logged.
 - **The forward test** (`scorecard.js`, `control.js`): Brier against equal odds, calibration, industry long − short at 3
   and 6 months, the plain-question control; the pass rule declared before the start.
+- **The sector layer** ([situation-network-layers.md](docs/design/situation-network-layers.md), 2026-11-23; on with the
+  network, `SITUATION_SECTORS=off` for macro only): under the macro layer, one small state per GICS sector (`sectorState.js`:
+  the macro backdrop and its prices by code; its own news — two GNews topics, two Federal Register terms, FMP news on its
+  largest names — policy, calendar and 1–6 questions) grown into its own trees at 3 open questions per sector (30 across
+  sectors). ONE network: links cross layers (macro → sector, sector → sector, sector → macro); a sector question reaching 3+
+  sectors is promoted to macro. A weekly update runs the macro call and one call per sector; the triage names the layers an
+  event touches. Every weekly update REWRITES the descriptions (macro, then each sector) from the week's news and the live
+  questions, so the picture never lags the network. A promoted question keeps its origin: graded, and counted in
+  "macro alone", by the layer it was born in. Industries are scored over both layers and over the macro layer alone;
+  the scorecard grades each layer.
+  A network built before the layer gets it added (a `sectors` run). The board filters by layer.
 - **The app**: `/api/situation` (`/access` for everyone; the rest gated), Axl's `get_situation`, the Floor's Situation board.
 
 ### Off-hours: nothing executes while the venue is shut
@@ -912,7 +923,7 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 - (retired 2026-11-19: `echo_forward`, the engine's forward test, no longer read; `echo_user_events`, replaced by
   `echo_events`.)
 - `situation_runs` · `situation_states` · `situation_nodes` · `situation_links` · `situation_dropped` · `situation_industries` ·
-  `situation_forecasts` · `situation_outside` — the situation network, one document per record per run (`run_id`); a run is
+  `situation_forecasts` · `situation_outside` · `situation_sector_states` — the situation network, one document per record per run (`run_id`); a run is
   written whole and then marked complete (`services/situation/store.js`). `situation_watch` — the news watcher's state;
   `situation_control` — the plain-question control per date. `industry_reactions` (engine db) — the declared past events.
 - `stock_profiles` — Proteus v2's profile per symbol (`{ symbol, version, scales: {day, swing, long}, built: {day, swing, long} }`),

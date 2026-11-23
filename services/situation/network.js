@@ -18,6 +18,7 @@ import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
 import { checkNode, newId, SETTLED_AT, realDate } from './model.js'
 import { anchorFor } from './propagate.js'
+import { layerOf, layerName } from './sectors.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[situation.network]'
@@ -75,10 +76,10 @@ export function networkSchema() {
 }
 
 /** The user message: the state as dated lines, then the numbered questions with their options. Pure. */
-export function networkPrompt(state, questions) {
+export function networkPrompt(state, questions, title = null) {
     const sec = Object.entries(state.sections).map(([name, items]) => `${name.toUpperCase()}:\n${items.map(i => `- ${i.as_of} [${i.tag}] ${i.text}`).join('\n') || '- (none)'}`)
     const qs = questions.map((q, i) => `${i + 1}. [${q.tree}] ${q.question}\n   options: ${q.options.map(o => `${o.key} = ${o.label}`).join('; ')}\n   impact ${q.impact}, uncertainty ${q.uncertainty}. ${q.why}`)
-    return [`AS-OF DATE: ${state.as_of}.`, '', 'THE STATE:', ...sec, '', `THE QUESTIONS (${questions.length}):`, ...qs, '', 'Answer every question, then the links.'].join('\n')
+    return [...(title ? [title] : []), `AS-OF DATE: ${state.as_of}.`, '', 'THE STATE:', ...sec, '', `THE QUESTIONS (${questions.length}):`, ...qs, '', 'Answer every question, then the links.'].join('\n')
 }
 
 const median = (xs) => { const s = [...xs].sort((a, b) => a - b); const m = s.length >> 1; return s.length % 2 ? s[m] : (s[m - 1] + s[m]) / 2 }
@@ -154,7 +155,7 @@ export function combineRuns(runs, questions, asOf) {
  * Combined answers → the run's records: nodes (with ids, givens, anchors), links, the dropped list and the forecasts.
  * The cap holds on OPEN nodes; settled nodes are outside it. Pure apart from new ids.
  */
-export function assemble(questions, combined, asOf) {
+export function assemble(questions, combined, asOf, { cap = OPEN_CAP, layer = 'macro' } = {}) {
     const ids = new Map(questions.map((_, i) => [i + 1, newId('node')]))
     const drops = new Map()   // q → { reason, note }
     const kinds = new Map()
@@ -169,7 +170,7 @@ export function assemble(questions, combined, asOf) {
     const open = [...combined.nodes.keys()].filter(n => !drops.has(n) && kinds.get(n) === 'open')
         .map(n => ({ n, score: IMPACT_WEIGHT[questions[n - 1].impact] * uncertainty(combined.nodes.get(n).p) }))
         .sort((a, b) => b.score - a.score)
-    for (const { n } of open.slice(OPEN_CAP)) drops.set(n, { reason: 'cap', note: `ranked below the ${OPEN_CAP} open nodes kept` })
+    for (const { n } of open.slice(cap)) drops.set(n, { reason: 'cap', note: `ranked below the ${cap} open nodes kept` })
     // Each surviving node checked (model.checkNode) BEFORE the chains are walked, so a node that fails takes the nodes
     // under it along. A missing signpost is said, not invented.
     const checkedBy = new Map()
@@ -177,7 +178,7 @@ export function assemble(questions, combined, asOf) {
         if (drops.has(n)) continue
         const q = questions[n - 1]
         const input = {
-            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', confidence: c.confidence, impact: q.impact,
+            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', confidence: c.confidence, impact: q.impact, layer,
             // The drift rule's first baseline: the build's numbers (Roy reviews the open nodes from the first card).
             review: { on: asOf, p: Object.fromEntries(q.options.map((o, i) => [o.key, c.p[i]])) },
             options: q.options.map((o, i) => ({ key: o.key, label: o.label, p: c.p[i], signpost: c.signposts[o.key] ?? NO_SIGNPOST })),
@@ -210,10 +211,10 @@ export function assemble(questions, combined, asOf) {
         considered: questions.length, open: anchored.filter(x => x.kind === 'open').length, settled: anchored.filter(x => x.kind === 'settled').length,
         dropped: [...drops.entries()].sort((a, b) => a[0] - b[0]).map(([n, d]) => ({
             question: questions[n - 1].question, options: questions[n - 1].options.map(o => o.label), reason: d.reason, note: d.note ?? null,
-            duplicate_of: d.duplicate_of ? questions[d.duplicate_of - 1]?.question ?? null : null, flagged: d.reason === 'cap',
+            duplicate_of: d.duplicate_of ? questions[d.duplicate_of - 1]?.question ?? null : null, flagged: d.reason === 'cap', layer,
         })),
     }
-    const forecasts = anchored.flatMap(x => x.options.map(o => ({ node_id: x.node_id, option: o.key, p: o.p, set_by: 'llm', resolve_by: x.resolve_by })))
+    const forecasts = anchored.flatMap(x => x.options.map(o => ({ node_id: x.node_id, option: o.key, p: o.p, set_by: 'llm', resolve_by: x.resolve_by, layer })))
     return { nodes: anchored, links, dropped, forecasts }
 }
 
@@ -221,11 +222,11 @@ export function assemble(questions, combined, asOf) {
  * The state and its questions → `{ ok: true, nodes, links, dropped, forecasts, cost_usd, runs }` or `{ ok: false,
  * reason, cost_usd }`. RUNS calls in parallel; a failed run is left out, and fewer than two answers is a failure.
  */
-export async function buildNetwork(state, questions) {
+export async function buildNetwork(state, questions, { cap = OPEN_CAP, layer = 'macro', title = null } = {}) {
     if (!questions?.length) return { ok: false, reason: 'no questions', cost_usd: 0 }
     let cost = 0, payer = null
     try { payer = await _io.payer() } catch { /* unbooked */ }
-    const user = networkPrompt(state, questions)
+    const user = networkPrompt(state, questions, title)
     const one = () => _io.call({
         model: NETWORK_MODEL, effort: NETWORK_EFFORT, systemPrompt: _io.system(), user, schema: networkSchema(),
         onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) },
@@ -233,7 +234,7 @@ export async function buildNetwork(state, questions) {
     const runs = (await Promise.all(Array.from({ length: RUNS }, one))).filter(Boolean)
     if (runs.length < 2) return { ok: false, reason: `only ${runs.length} of ${RUNS} network runs answered`, cost_usd: cost }
     const combined = combineRuns(runs, questions, state.as_of)
-    return { ok: true, ...assemble(questions, combined, state.as_of), cost_usd: cost, runs: runs.length }
+    return { ok: true, ...assemble(questions, combined, state.as_of, { cap, layer }), cost_usd: cost, runs: runs.length }
 }
 
 // ─── links for NEW nodes (code review 2026-11-23, Roy's "fix all"): an update or a rebuild that adds a question used to
@@ -243,7 +244,10 @@ export const LINKS_EFFORT = 'medium'
 export const LINKS_SYSTEM = 'You link NEW questions into the house\'s situation network: questions about what happens next, each with options. '
     + 'Give only the LINKS that start or end on a question marked NEW: where one question\'s option, if it happens, makes an option of '
     + 'ANOTHER question more or less likely — a direct channel only, with its direction (raises / lowers), strength (small / medium / '
-    + 'large), lag in days and why in one sentence. Not every pair is linked; none is fine. Answer in the JSON schema.'
+    + 'large), lag in days and why in one sentence. Each question names its LAYER: Macro, or a sector. Links may cross layers — '
+    + 'macro → sector is the most common (a Fed hike raises "biotech funding dries up"), sector → sector happens (AI capex raises '
+    + '"utilities sign power deals"), sector → macro is rarer (bank failures raise "the Fed cuts"). Only strong, direct channels you can '
+    + 'explain in one sentence: fewer, stronger links. Not every pair is linked; none is fine. Answer in the JSON schema.'
 
 export function linksSchema() {
     return { type: 'object', additionalProperties: false, required: ['links'], properties: { links: networkSchema().properties.links } }
@@ -253,7 +257,7 @@ export function linksSchema() {
 export function linksPrompt(nodes, newIds) {
     const fresh = new Set(newIds)
     return [`THE QUESTIONS (${nodes.length}):`,
-        ...nodes.map((n, i) => `${i + 1}. ${fresh.has(n.node_id) ? 'NEW ' : ''}[${n.tree}] ${n.question}\n   options: ${n.options.map(o => `${o.key} = ${o.label}`).join('; ')}`),
+        ...nodes.map((n, i) => `${i + 1}. ${fresh.has(n.node_id) ? 'NEW ' : ''}[${layerName(layerOf(n))} · ${n.tree}] ${n.question}\n   options: ${n.options.map(o => `${o.key} = ${o.label}`).join('; ')}`),
         '', 'Give the links that start or end on a NEW question.'].join('\n')
 }
 

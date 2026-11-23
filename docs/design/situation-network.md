@@ -107,6 +107,9 @@ limits are LLM spend and the 512 MB Mongo cap (prune dead branches, keep version
 
 ## 7. Stage 5: companies (a second prompt)
 
+> 2026-11-23: widened in `situation-network-layers.md` — a sector layer under the macro layer, and this stage
+> becomes the industry layer, built only for the industries the layers above flag.
+
 For each industry the network points to, the network continues to companies, from a **new current state at
 company level**:
 

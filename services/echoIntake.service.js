@@ -142,10 +142,13 @@ export async function eightKs(now = _deps.now()) {
     return out
 }
 
-/** The Federal Register's rules and presidential documents on the doc's policy terms (`days` back; the situation network reads a week). */
-export async function policy(now = _deps.now(), { days = LOOKBACK_DAYS } = {}) {
+/**
+ * The Federal Register's rules and presidential documents on the doc's policy terms (`days` back; the situation network
+ * reads a week). `terms` replaces Echo's five for another reader (the situation network's sectors ask their own).
+ */
+export async function policy(now = _deps.now(), { days = LOOKBACK_DAYS, terms = POLICY_TERMS } = {}) {
     const out = [], seen = new Set()
-    for (const term of POLICY_TERMS) {
+    for (const term of terms) {
         const p = new URLSearchParams({ 'conditions[publication_date][gte]': daysAgo(now, days), 'conditions[term]': term, per_page: '20', order: 'newest' })
         for (const t of ['RULE', 'PRESDOCU']) p.append('conditions[type][]', t)
         let j

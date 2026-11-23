@@ -13,8 +13,9 @@
 //   outside   an event that hits one industry and no node (§11.11)
 
 import { randomUUID } from 'node:crypto'
+import { isLayer, MACRO } from './sectors.js'
 
-export const RUN_KINDS = Object.freeze(['build', 'rebuild', 'weekly', 'event'])
+export const RUN_KINDS = Object.freeze(['build', 'rebuild', 'weekly', 'event', 'sectors'])
 export const SECTIONS = Object.freeze(['regime', 'policy', 'money', 'stories', 'prices', 'calendar'])
 export const TAGS = Object.freeze(['fact', 'reading'])
 export const NODE_KINDS = Object.freeze(['open', 'settled'])
@@ -100,6 +101,29 @@ export function checkState(input = {}) {
     return ok({ as_of: input.as_of, sections, articles })
 }
 
+/** A sector state's sections (situation-network-layers.md §4.2): the macro backdrop and prices by code, the rest by the model. */
+export const SECTOR_SECTIONS = Object.freeze(['backdrop', 'prices', 'news', 'policy', 'calendar'])
+
+/** A sector state: the sector's code, its date, every section checked like the macro state's, the articles it read. */
+export function checkSectorState(input = {}) {
+    if (!isLayer(input.sector) || input.sector === MACRO) return bad('a sector state names its sector code')
+    const base = checkState({ as_of: input.as_of, sections: Object.fromEntries(SECTIONS.map(s => [s, []])), articles: input.articles })
+    if (!base.ok) return bad(`sector ${input.sector}: ${base.reason}`)
+    const sections = {}
+    for (const name of SECTOR_SECTIONS) {
+        const items = input.sections?.[name]
+        if (!Array.isArray(items)) return bad(`sector ${input.sector}: section ${name} is missing (send [] if there is nothing)`)
+        sections[name] = []
+        for (const it of items) {
+            const c = checkItem(it)
+            if (!c.ok) return bad(`sector ${input.sector} ${name}: ${c.reason}`)
+            if (c.value.as_of > input.as_of) return bad(`sector ${input.sector} ${name}: "${c.value.text.slice(0, 40)}" is dated after the state's as_of`)
+            sections[name].push(c.value)
+        }
+    }
+    return ok({ sector: input.sector, as_of: input.as_of, sections, articles: base.value.articles })
+}
+
 /**
  * A node (§3): 2–4 options summing to 1; open or settled DERIVED from the numbers (a settled node's top option is
  * ≥ SETTLED_AT); a settled node's minority options are dormant and each needs a signpost; a resolved node names the
@@ -179,8 +203,15 @@ export function checkNode(input = {}) {
     // Dormant branches whose signposts fired (§11.9): [{ option, on, evidence }] — the early warnings' source.
     const woken = (Array.isArray(input.woken) ? input.woken : []).filter(w => options.some(o => o.key === w?.option))
         .map(w => ({ option: w.option, on: realDate(w.on) ? w.on : null, evidence: text(w.evidence, 400) || null }))
+    // The LAYER (situation-network-layers.md §2): 'macro' or the sector code a sector state asked it in. A node from
+    // before the sector layer is macro.
+    const layer = input.layer == null ? MACRO : input.layer
+    if (!isLayer(layer)) return bad(`"${question.slice(0, 40)}": layer must be macro or a sector code`)
+    // Its ORIGIN: the layer it was born in (sectors.originOf) — differs from `layer` only once it was promoted.
+    const origin = input.origin == null ? layer : input.origin
+    if (!isLayer(origin)) return bad(`"${question.slice(0, 40)}": origin must be macro or a sector code`)
     return ok({
-        given, anchor, impact, woken,
+        given, anchor, impact, woken, layer, origin,
         review,
         node_id: input.node_id ?? newId('node'), tree, question, kind, status, options,
         lag: lag.value, resolve_by: input.resolve_by ?? null, resolved,
@@ -227,7 +258,7 @@ export function checkDropped(input = {}) {
         dropped.push({
             question, reason: d.reason, note: text(d.note, 240) || null, duplicate_of: d.duplicate_of ?? null,
             options: (Array.isArray(d.options) ? d.options : []).map(o => text(o, 160)).filter(Boolean),
-            flagged: d.flagged === true,
+            flagged: d.flagged === true, layer: isLayer(d.layer) ? d.layer : MACRO,
         })
     }
     const { considered, open, settled } = input
@@ -252,6 +283,8 @@ export function checkIndustry(input = {}) {
         expected: typeof input.expected === 'number' && Number.isFinite(input.expected) ? input.expected : null,
         paths: Array.isArray(input.paths) ? input.paths.slice(0, 50) : [],
         early_warning: input.early_warning ?? null,
+        // The chances over the MACRO branches alone (layers §6): the macro layer's own industry score, kept beside.
+        macro: input.macro && isProb(input.macro.p_win) && isProb(input.macro.p_lose) ? { p_win: input.macro.p_win, p_lose: input.macro.p_lose } : null,
     })
 }
 
@@ -266,7 +299,7 @@ export function checkForecast(input = {}) {
     return ok({
         forecast_id: input.forecast_id ?? newId('fc'), node_id: input.node_id, option: input.option,
         p: input.p, set_by: input.set_by, llm_p: input.llm_p ?? null, reviewed: input.reviewed === true,
-        resolve_by: input.resolve_by ?? null, outcome: null, resolved_on: null,
+        resolve_by: input.resolve_by ?? null, outcome: null, resolved_on: null, layer: isLayer(input.layer) ? input.layer : MACRO,
     })
 }
 

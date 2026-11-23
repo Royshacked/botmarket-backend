@@ -119,7 +119,7 @@ export function onePerWeek(items) {
     return [...m.values()]
 }
 
-export const SCORED_KINDS = Object.freeze(['build', 'rebuild', 'weekly'])
+export const SCORED_KINDS = Object.freeze(['build', 'rebuild', 'weekly', 'sectors'])
 /** The runs the industry test scores: per ISO week, the latest scheduled run (runs oldest first). Pure. */
 export function scoredRuns(runs) {
     return onePerWeek(runs.filter(r => SCORED_KINDS.includes(r.kind)))
@@ -158,17 +158,24 @@ export async function buildScorecard() {
     // override, which would add near-identical, overlapping 6-month windows and inflate the t-stat (code review
     // 2026-11-23). The control likewise, one per week.
     const weekly = scoredRuns(runs)
-    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: weekly.map(r => r.run_id) } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1 } }).toArray()
+    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: weekly.map(r => r.run_id) } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1, macro: 1 } }).toArray()
     const byRun = new Map()
     for (const i of inds) { if (!byRun.has(i.run_id)) byRun.set(i.run_id, []); byRun.get(i.run_id).push(i) }
     const callsOf = (rows, as_of) => ({ as_of, long: rows.filter(r => r.p_win >= CALL_AT).map(r => `${r.level}:${r.code}`), short: rows.filter(r => r.p_lose >= CALL_AT).map(r => `${r.level}:${r.code}`) })
     const calls = weekly.map(r => callsOf(byRun.get(r.run_id) ?? [], r.as_of))
+    // The macro layer ALONE (situation-network-layers.md §6): its own chances where the run kept them; a run from before
+    // the sector layer WAS the macro layer.
+    const macroCalls = weekly.map(r => callsOf((byRun.get(r.run_id) ?? []).map(i => (i.macro ? { ...i, ...i.macro } : i)), r.as_of))
     const ctrl = onePerWeek(control).map(c => callsOf(c.rows ?? [], c.as_of))
     // Only forecasts logged by a run that was SAVED whole count (a save that failed part-way leaves rows behind).
     const complete = new Set(runs.map(r => r.run_id))
-    const nodes = nodeScores(forecasts.filter(f => complete.has(f.run_id)))
+    const counted = forecasts.filter(f => complete.has(f.run_id))
+    const nodes = nodeScores(counted)
+    // Brier per layer: the macro questions, and every sector's together (a row from before the layers is macro).
+    const layers = { macro: nodeScores(counted.filter(f => (f.layer ?? 'macro') === 'macro')).all, sectors: nodeScores(counted.filter(f => (f.layer ?? 'macro') !== 'macro')).all }
     const net = { m3: spreadSummary(spreads(calls, index, HORIZONS.m3)), m6: spreadSummary(spreads(calls, index, HORIZONS.m6)) }
+    const macroOnly = { m3: spreadSummary(spreads(macroCalls, index, HORIZONS.m3)), m6: spreadSummary(spreads(macroCalls, index, HORIZONS.m6)) }
     const plain = { m3: spreadSummary(spreads(ctrl, index, HORIZONS.m3)), m6: spreadSummary(spreads(ctrl, index, HORIZONS.m6)) }
     const startedOn = runs.find(r => r.kind === 'build')?.as_of ?? null
-    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, industries: net, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
+    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, industries: net, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
 }

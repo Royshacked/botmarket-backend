@@ -67,6 +67,17 @@ export function sanitizeGNewsQuery(query) {
 // its own fixed 1.4s one-retry around a bare fetch: the same mechanism a second time, without a
 // timeout, and the number was right.
 const RETRY_MIN_MS = 1_100
+// And callers at the same moment are SPACED: the situation network's sector layer reads 22 topics, three sectors at a
+// time, and every one of the first burst earned a 429 through all three retries (the 2026-11-23 dev build). One slot per
+// SPACING_MS for the whole process; a caller waits for its slot instead of racing the others.
+const SPACING_MS = 1_100
+let _nextSlot = 0
+async function _slot() {
+    const now = Date.now()
+    const at = Math.max(now, _nextSlot)
+    _nextSlot = at + SPACING_MS
+    if (at > now) await new Promise(r => setTimeout(r, at - now))
+}
 
 /**
  * @param {{ query: string, from?: string, to?: string, max?: number }} opts
@@ -93,6 +104,7 @@ export async function fetchGNews({ query, from, to, max = 20, lang = 'en' } = {}
     const url = `${GNEWS_API_URL}/search?${params.toString()}`
 
     try {
+        await _slot()
         return await getJson(url, { label: 'GNews /search', retryMinMs: RETRY_MIN_MS })
     } catch (error) {
         // GNews's own words ride on the error body; the message the tool reads should carry them.

@@ -18,7 +18,7 @@ test('dueKind: build first; a 28-day-old build rebuilds; a week-old run updates;
 
 test('the triage prompt lists the live questions with their dormant signposts', () => {
     const p = triagePrompt([{ n: 1, node: { question: 'Tariffs in Q1?', options: [{ label: 'yes', p: 0.85 }, { label: 'no', p: 0.15, dormant: true, signpost: 'no order by 1 Feb' }] } }], [])
-    assert.match(p, /1\. Tariffs in Q1\? — yes 85%; no 15% \(dormant: no order by 1 Feb\)/)
+    assert.match(p, /1\. \[macro\] Tariffs in Q1\? — yes 85%; no 15% \(dormant: no order by 1 Feb\)/)
 })
 
 function fakeDb(runs = []) {
@@ -26,6 +26,7 @@ function fakeDb(runs = []) {
     const coll = (name) => ({
         findOne: async (q) => (store[name] ?? []).find(d => d._id === q._id) ?? null,
         updateOne: async (q, u) => { const arr = store[name] ??= []; let d = arr.find(x => x._id === q._id); if (!d) { d = { _id: q._id }; arr.push(d) } Object.assign(d, u.$set) },
+        countDocuments: async (q = {}) => (store[name] ?? []).filter(d => !q.run_id || d.run_id === q.run_id).length,
         find: (q = {}) => { let out = (store[name] ?? []).filter(r => !q.kind || q.kind.$in.includes(r.kind)); const c = { sort: () => c, limit: () => c, next: async () => out[0] ?? null, toArray: async () => out }; return c },
     })
     return { collection: coll, store }
@@ -38,7 +39,7 @@ test('tick: off unless SITUATION_NETWORK; the first build; then the weekly; each
         assert.deepEqual(await tick(), { off: true })
         process.env.SITUATION_NETWORK = 'true'
         const cards = [], did = []
-        _setIO({ now: () => new Date('2025-01-07T12:00:00Z'), db: async () => fakeDb(), latest: async () => null, busy: async () => {}, free: async () => {},
+        _setIO({ sectorsOn: () => false, now: () => new Date('2025-01-07T12:00:00Z'), db: async () => fakeDb(), latest: async () => null, busy: async () => {}, free: async () => {},
             build: async (o) => { did.push(o.kind); return { ok: true, run_id: 'r1' } }, card: async (id) => cards.push(id), control: async (id) => did.push(`control ${id}`) })
         assert.equal((await tick()).did, 'build')
         _setIO({ latest: async () => ({ run_id: 'r1', as_of: '2024-12-31' }), db: async () => fakeDb([{ kind: 'build', as_of: '2024-12-31', complete: true }]),
@@ -56,7 +57,7 @@ test('tick: the watch — new articles to triage; material news is one event upd
         const db = fakeDb([{ kind: 'build', as_of: '2025-01-05', complete: true }])
         let updates = 0, triaged = 0
         _setIO({
-            now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
+            sectorsOn: () => false, now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
             read: async () => ({ nodes: [node('a', { a: 0.5, b: 0.5 })] }),
             policy: async () => [], fmpNews: async () => [{ title: 'Big tariff news', date: '2025-01-07', url: 'https://n/1' }],
             payer: async () => null, call: async () => { triaged++; return { data: { material: true, why: 'tariffs signed', articles: [1] } } },
@@ -140,7 +141,7 @@ test('a failed scheduled job is recorded with its cost and waits a day; success 
         process.env.SITUATION_NETWORK = 'true'
         const db = fakeDb([{ kind: 'build', as_of: '2024-12-31', complete: true }])
         let tries = 0
-        _setIO({ now: () => new Date('2025-01-08T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2024-12-31' }),
+        _setIO({ sectorsOn: () => false, now: () => new Date('2025-01-08T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2024-12-31' }),
             busy: async () => {}, free: async () => {}, card: async () => {}, control: async () => {},
             update: async () => { tries++; return { ok: false, reason: 'save rejected', cost_usd: 0.5 } } })
         const r1 = await tick()

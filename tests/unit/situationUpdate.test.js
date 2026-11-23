@@ -1,8 +1,9 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { updateSchema, numbered, updatePrompt, fitProbabilities, overCap, reviewItems, applyAnswer, runUpdate, _setIO, REVIEW_MOVE } from '../../services/situation/update.js'
+import { updateSchema, numbered, updatePrompt, fitProbabilities, reviewItems, applyAnswer, runUpdate, _setIO, REVIEW_MOVE } from '../../services/situation/update.js'
 import { checkBundle } from '../../services/situation/store.js'
+import { holdCaps } from '../../services/situation/layers.js'
 import { anchorFor } from '../../services/situation/propagate.js'
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`)
@@ -37,10 +38,10 @@ test('fitProbabilities fits a list to the keys and renormalises; nothing positiv
     assert.equal(fitProbabilities(['a'], []), null)
 })
 
-test('overCap drops the lowest impact × uncertainty open nodes; settled ones never count', () => {
+test('holdCaps (the macro layer) drops the lowest impact × uncertainty open nodes; settled ones never count', () => {
     const ns = [node('a', { x: 0.5, y: 0.5 }), node('b', { x: 0.7, y: 0.3 }, { impact: 'low' }), node('c', { x: 0.9, y: 0.1 }, { kind: 'settled' })]
-    assert.deepEqual(overCap(ns, 1), ['b'])
-    assert.deepEqual(overCap(ns, 5), [])
+    assert.deepEqual(holdCaps(ns, { macro: 1 }), ['b'])
+    assert.deepEqual(holdCaps(ns, { macro: 5 }), [])
 })
 
 test('reviewItems: a move over 10 points; drift since the last review; new, woken and resolved', () => {
@@ -107,6 +108,8 @@ test('runUpdate: from the latest run to a saved run that passes every check, wit
             events: [ev({ decision: 'resolves', node: 2, resolution: { option: 'yes', evidence: 'Orders signed' } }), ev({ decision: 'moves_option', node: 1, probabilities: [{ option: 'threats', value: 0.2 }, { option: 'china', value: 0.3 }, { option: 'all', value: 0.5 }] })],
             signposts_fired: [], due: [] } } },
         exposures: async () => ({ industries: [] }), map: async () => ({ ok: true, effects: new Map(), cost_usd: 0 }),
+        // No live data or model call from a test: the weekly path's data refresh and rewrite are stubbed.
+        data: async () => ({ sections: null, gaps: [] }), rewrite: async () => ({ ok: false, reason: 'stub', cost_usd: 0 }), sectorsOn: () => false,
         save: async (b) => { saved = b; const c = checkBundle(b); return c.ok ? { ok: true, run_id: 'run_2' } : c },
         grade: async (id, opt) => { graded.push(`${id}:${opt}`); return 1 },
     })

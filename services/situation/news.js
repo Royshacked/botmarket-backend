@@ -9,6 +9,7 @@
 
 import { echoIntakeService } from '../echoIntake.service.js'
 import { fetchGNews } from '../../providers/gnews.provider.js'
+import { fetchStockNews } from '../../providers/fmp.provider.js'
 import { config } from '../config.js'
 import { logger } from '../logger.service.js'
 
@@ -31,6 +32,8 @@ const _io = {
     fmpNews: (now, days) => echoIntakeService.news(now, { days, pages: FMP_MAX_PAGES }),
     defense: (now) => echoIntakeService.defense(now),
     gnews: (q, from, to) => fetchGNews({ query: q, from, to, max: 10 }),
+    sectorPolicy: (now, days, terms) => echoIntakeService.policy(now, { days, terms }),
+    stockNews: (symbols, from, to) => fetchStockNews({ symbols, from, to, limit: 50 }),
     hasGnews: () => Boolean(config.gnewsApiKey),
     now: () => new Date(),
 }
@@ -109,4 +112,36 @@ export async function fetchNews({ days = 7, asOf = null } = {}) {
         gaps.push('GNews: no GNEWS_API_KEY — the feed runs on the Federal Register, FMP and Defense only')
     }
     return { articles: mergeArticles(lists, until), gaps }
+}
+
+/** A sector's articles are fewer than the macro feed's: its prompt is small. */
+export const SECTOR_MAX_ARTICLES = 60
+/** FMP news on a sector's names: at most this many per name, so one name's busy week does not fill the feed. */
+export const PER_NAME = 4
+
+/**
+ * ONE sector's feed for the `days` up to `asOf` (situation-network-layers.md §4.3) → `{ articles, gaps }`: its two GNews
+ * topics (not with `gnews: false`), its own Federal Register terms, FMP news on its largest `names`. Dated, deduped,
+ * nothing after `asOf`; a source that fails is a named gap. Never throws.
+ */
+export async function fetchSectorNews(sector, { days = 7, asOf = null, names = [], gnews = true } = {}) {
+    const now = _io.now()
+    const until = asOf ?? day(now)
+    const gaps = []
+    const guard = async (name, fn) => { try { return (await fn()) ?? [] } catch (err) { gaps.push(`${sector.name} ${name}: ${err.message}`); return [] } }
+    const from = new Date(Date.parse(`${until}T00:00:00Z`) - days * 864e5).toISOString()
+    const lists = []
+    lists.push((await guard('Federal Register', () => _io.sectorPolicy(now, days, sector.terms))).map(r => toArticle(r, 'Federal Register')))
+    if (names.length) {
+        const rows = await guard('FMP stock news', () => _io.stockNews(names, from.slice(0, 10), until))
+        const per = new Map()
+        lists.push(rows.filter(r => { const k = r.symbol ?? ''; per.set(k, (per.get(k) ?? 0) + 1); return per.get(k) <= PER_NAME }).map(r => toArticle({ ...r, published_at: String(r.publishedDate ?? r.published_at ?? r.date ?? '').replace(' ', 'T') || null, source: { name: r.site ?? r.publisher ?? 'FMP stock news' } }, 'FMP stock news')))
+    }
+    if (!gnews) { /* the watcher's hourly look: GNews' quota is the weekly run's */ } else if (_io.hasGnews()) {
+        for (const q of sector.gnews) {
+            const j = await guard(`GNews "${q}"`, () => _io.gnews(q, from, `${until}T23:59:59Z`))
+            lists.push((j?.articles ?? []).map(r => toArticle(r, 'GNews')))
+        }
+    } else gaps.push(`${sector.name}: no GNEWS_API_KEY — no GNews topics`)
+    return { articles: mergeArticles(lists, until, SECTOR_MAX_ARTICLES), gaps }
 }

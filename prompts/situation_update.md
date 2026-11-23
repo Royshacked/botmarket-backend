@@ -22,5 +22,9 @@ as-of date.
 3. DUE. Questions marked DUE have passed their resolve-by date. For each, say whether it resolved (and how, with the
    evidence) or is still open (and a new resolve-by date).
 
+THE LAYERS. The network has a macro layer and a layer per sector, each updated in its own call. When the message starts
+with SECTOR, the network you see is that sector's questions only: decide only what is particular to the sector (macro
+news is `none` here — the macro call has it), and a `new_question` must be about the sector, not the macro picture.
+
 Do not repeat a decision: one question moved by three articles is one `moves_option` citing all three.
 Answer in the JSON schema given.

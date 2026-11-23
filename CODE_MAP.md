@@ -1250,15 +1250,30 @@ services/
                             watches and grades. monitoring/echoPipeline.monitor (hourly; intake every 3 h; ECHO_PIPELINE).
   echo.service.js           ECHO, READ: the pipeline's events shaped for the Hotlist and the desk — links ranked (flags,
                             then score) with factors, evidence, check and grades; the validation report.
-  ── THE SITUATION NETWORK (docs/design/situation-network.md + -plan.md, 2026-11-23; being built, industries only) ──
+  ── THE SITUATION NETWORK (docs/design/situation-network.md + -plan.md, 2026-11-23; industries only) ──
+  ── its SECTOR LAYER (docs/design/situation-network-layers.md, 2026-11-23): a macro layer and one per GICS sector under
+     it, ONE network (links cross layers), caps per layer, promotion up, graded per layer; SITUATION_SECTORS=off for macro only ──
   situation/access.js       canSeeSituation — the ONE gate (route, Axl tool, board): the SITUATION_USERS allow-list, not
                             the admin role (Roy + Marce). SITUATION_NETWORK opt-in.
   situation/model.js        the records, pure: checkState (six dated, sourced, fact/reading sections), checkNode (2–4
                             options summing to 1; open/settled DERIVED at 0.8; dormant branches need a signpost; resolved
                             needs evidence; the review baseline for the drift rule), checkLink (branch → option, log-odds
                             shift ≤ 3), checkDropped (counts add up), checkIndustry, checkForecast, checkOutside, checkRun.
+                            A node's `layer` ('macro' or a sector code), kept on dropped items and forecasts; an industry's
+                            `macro` chances; checkSectorState (backdrop / prices / news / policy / calendar); run kind `sectors`.
+  situation/sectors.js      the 11 sectors (code, name, two GNews topics, two Federal Register terms — the network's own),
+                            sectorOf(code) by the GICS prefix, layerOf / layerName, SECTOR_CAP 3, SECTORS_TOTAL_CAP 30,
+                            PROMOTE_AT 3, topNames (each sector's largest names by market cap, gics_companies).
+  situation/sectorState.js  buildSectorState: the macro BACKDROP and the sector's PRICES by code + its news → ONE Opus call
+                            (prompts/situation_sector_state.md, effort medium): its news, policy, calendar, 1–6 questions.
+  situation/layers.js       buildSectorStates / buildSectorLayer (each sector's state → its network at the sector cap → ONE
+                            linksFor call over every live node; a failed sector is a gap), holdCaps / capOut (macro 20, each
+                            sector 3, all sectors 30; children go with parents), promote (a sector question reaching 3+
+                            sectors moves to macro, keeping its `origin`), anchorLinks (a new link counts from now),
+                            withMacroScores (questions BORN macro only; forecasts are graded by origin too).
   situation/store.js        `situation_*` collections (runs, states, nodes, links, dropped, industries, forecasts, outside):
                             saveRun writes a run whole then marks it complete; latestRun / readRun read complete runs only.
+                            `situation_sector_states`: one per run and sector, saved and read with the run.
   situation/state.data.js   the state's four DATA sections by code (buildDataSections → sections + numbers + gaps): regime
                             (FRED fetchSeries: level, 3-month direction, yoy / q-o-q annualised / monthly change), prices
                             (S&P from the engine window, indices/gold/BTC from FMP, breadth, every industry_index basket vs
@@ -1267,6 +1282,8 @@ services/
   situation/news.js         the dated feed (fetchNews → articles + gaps): Echo's intake readers (Federal Register policy
                             with a `days` window, FMP general news over pages, capped FMP_PER_DAY; Defense awards) + GNews
                             on GNEWS_TOPICS; deduped, nothing after asOf, newest first; articleLines numbers them for citing.
+                            fetchSectorNews(sector): its GNews topics (not for the watcher), its Federal Register terms
+                            (echoIntake.policy takes `terms`), FMP stock news on its largest names (≤ 4 a name).
   situation/state.js        buildState(asOf): data + news → ONE structured Opus 5.5 call (prompts/situation_state.md) for
                             the reading sections (regime readings, policy, money, stories, calendar) and 15–35 open
                             questions; shapeAnswer (sources from cited articles, an uncited FACT dropped, dates clamped,
@@ -1289,6 +1306,9 @@ services/
                             the branches behind it), wouldBeEntries (30/50/70% crossings; the record only, no trades).
   situation/build.js        buildFull: state → network → exposures → mapping → scores → saveRun (kind build | rebuild),
                             effects kept on each option, cost by stage, gaps, entries. First live: $1.86 all in.
+                            With the sector layer: + buildSectorLayer, mapByLayer (one mapping per layer group), settle
+                            (promotion, caps, kept links, forecasts' final layer). buildSectors ADDS the layer to a network
+                            built before it (run kind `sectors`; the macro nodes carry over unchanged).
   situation/update.js       runUpdate (weekly | event | rebuild with `fresh` state + candidate questions): ONE Opus call
                             (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
                             new_question / resolves / outside / none), signposts fired, due questions → applyAnswer (live
@@ -1297,12 +1317,19 @@ services/
                             early warnings (woken branches, beside the scores), reviewItems (moved > 10 / drift since review
                             / new / woken / resolved; silence = accept resets the baseline); a weekly REFRESHES the code's
                             data sections (refreshSections); the head must not have moved before the save; forecasts graded
-                            AFTER the save. Live: $0.16–0.18.
+                            AFTER the save. Live: $0.16–0.18. With the layers: the macro call plus ONE call per sector (its
+                            questions, its news; `layers` limits an event update), answers applied in turn, promote +
+                            capOut, stats.layers. A WEEKLY update REWRITES the descriptions (state.rewriteState: the
+                            macro one from the week's news + the live macro questions' reasoning; then
+                            sectorState.rewriteSectorState per sector under the new backdrop); a failed rewrite keeps the
+                            readings with fresh numbers and is a named gap.
   situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d from the last SCHEDULED
                             run) → else the 3-hourly watch: Federal Register + FMP news → one Sonnet triage → an EVENT
                             update at most once a day, inside SITUATION_WEEKLY_USD (default $10; failed attempts and the
                             control counted). A failed scheduled job is recorded and waits a day (RETRY_AFTER_MS). Every
                             update runs under the store's BUSY flag; an override waits for it. After each run, Roy's card.
+                            A head with no sector state → a `sectors` run first. The watch also reads each sector's terms
+                            and largest names; the triage names the LAYERS the news touches (eventLayers).
   situation/review.js       cardLines / postReviewCard (to Roy only, botId axl, type situation_review; the first build
                             lists every open node) and overrideNode (Roy's numbers → a new run: re-anchored, spread,
                             re-scored, both numbers logged as forecasts).
@@ -1311,7 +1338,8 @@ services/
                             accepted / overridden / Roy's), spreads (long ≥ 60% − short ≥ 60% vs the equal-weight basket; the ~3 MB basket
                             lines read only once a call is 88+ days old, cached 6 h —
                             average at 63 / 126 bars), the declared verdict (5 checks). control.js: the plain question
-                            weekly, no network (`situation_control`), scored the same way.
+                            weekly, no network (`situation_control`), scored the same way. Per layer: Brier for macro and
+                            for the sectors; the industry spread also for the macro layer alone (`macro_only`).
   tools/situation.tools.js  get_situation (Axl; ALLOW-LIST only — axl.agent toolsForUser drops it for everyone else):
                             summary / industry / question / scorecard, read-only from the latest run; "untested" said.
   api/situation/            the board's API: GET /access → { ok } for every signed-in user; the rest behind the allow-list
