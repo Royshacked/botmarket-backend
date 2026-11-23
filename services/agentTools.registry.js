@@ -755,6 +755,14 @@ export const TOOL_SCHEMAS = {
         },
         "required": ["kind", "id"]
     },
+    // Axl's voice for the situation network (services/tools/situation.tools.js — Roy, 2026-11-23). Allow-listed users only.
+    get_situation: {
+        "type": "object",
+        "properties": {
+            "view": { "type": "string", "enum": ["summary", "industry", "question", "scorecard"], "description": "summary (default), one industry, one question, or the forward test's scorecard" },
+            "name": { "type": "string", "description": "the industry's name, or words from the question (for view industry / question)" }
+        }
+    },
     // Axl's read of the house's work on ONE company (services/tools/companyView.tools.js — Roy, 2026-11-21).
     get_company_view: {
         "type": "object",

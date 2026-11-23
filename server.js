@@ -76,6 +76,7 @@ import { turnsRoutes }       from './api/turns/turns.routes.js'
 import { marketRoutes }      from './api/market/market.routes.js'
 import { calendarRoutes }    from './api/calendar/calendar.routes.js'
 import { hotlistRoutes }     from './api/hotlist/hotlist.routes.js'
+import { situationRoutes }   from './api/situation/situation.routes.js'
 import { talosService }     from './monitoring/talos.monitor.service.js'
 import { coverageMonitorService } from './monitoring/coverage.monitor.service.js'
 import { industryViewMonitorService } from './monitoring/industryView.monitor.service.js'
@@ -228,6 +229,7 @@ app.use('/api/turns',       turnsRoutes)
 app.use('/api/market',      marketRoutes)
 app.use('/api/calendar',    calendarRoutes)
 app.use('/api/hotlist',     hotlistRoutes)
+app.use('/api/situation',   situationRoutes)   // the situation network's board — allow-listed users only (SITUATION_USERS)
 app.use('/api/chat',        chatRoutes)
 
 attachChatWs(server)

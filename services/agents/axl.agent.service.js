@@ -20,6 +20,8 @@ import { makeHotlistHandlers, HOTLIST_TOOL_SPEC } from '../tools/hotlist.tools.j
 import { makeCompanyViewHandlers, COMPANY_VIEW_TOOL_SPEC } from '../tools/companyView.tools.js'
 import { makeIndustryReadHandlers } from './strategy.agent.service.js'
 import { makeItemStatusHandlers, ITEM_STATUS_TOOL_SPEC } from '../tools/itemStatus.tools.js'
+import { makeSituationHandlers, SITUATION_TOOL_SPEC } from '../tools/situation.tools.js'
+import { canSeeSituation } from '../situation/access.js'
 import { REMEMBER_DESCRIPTION } from '../tools/userProfile.tools.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -101,10 +103,19 @@ export const TOOLS = toolsFor({
     get_geopolitics: `Geopolitical risk, MEASURED: the index of newspaper attention to geopolitical tension against its ten years, and the house's mapped risks (Taiwan Strait, US–China, the Gulf, the Red Sea, Russia–Ukraine…), elevated ones flagged; pass \`industry\` for the risks that touch it. Attention, not impact.`,
     // THE MONITORS' VIEW of one of the user's items (axl-one-voice.md §6, Roy 2026-11-21). Appended last.
     get_item_status: ITEM_STATUS_TOOL_SPEC.get_item_status,
+    // THE SITUATION NETWORK (situation-network.md §11.6, Roy 2026-11-23). Appended last. ALLOW-LISTED USERS ONLY: everyone
+    // else is sent the list without it (toolsForUser below) — no tool, no mention.
+    get_situation: SITUATION_TOOL_SPEC.get_situation,
 })
 
 // Without the turn's handler (the social chat — a DM, no session to write the specialist's row into) the tool is not offered.
 const TOOLS_NO_SPECIALIST = TOOLS.filter(t => t.name !== 'ask_specialist')
+
+/** The list this user is sent: get_situation only for the situation network's allow-list. Pure. */
+export function toolsForUser(userId, { specialist = true } = {}) {
+    const base = specialist ? TOOLS : TOOLS_NO_SPECIALIST
+    return canSeeSituation(userId) ? base : base.filter(t => t.name !== 'get_situation')
+}
 
 // NO `consult` HERE, deliberately — the reasoning sidecar reached the other five desks on
 // 2026-08-16 and was pulled back off this one the same day. Not because reception never faces a
@@ -190,6 +201,7 @@ async function chatStream({ messages = [], audience = null, isAdmin = false, sur
     _companyViewHandlers = makeCompanyViewHandlers,
     _industryReadHandlers = makeIndustryReadHandlers,
     _itemStatusHandlers = makeItemStatusHandlers,
+    _situationHandlers = makeSituationHandlers,
     _venueSection = buildVenueSection,
 } = {}) {
     // The venue rides the last USER message, not the system prompt: free cash moves whenever
@@ -262,6 +274,8 @@ ${audienceBlock}` : ''}` },
         ..._industryReadHandlers(),
         // Bound: the user's own items, owner-checked.
         ..._itemStatusHandlers(userId),
+        // Bound: the allow-list is checked again inside (the tool is not offered off it, either).
+        ..._situationHandlers(userId),
         ...(askSpecialist ? { ask_specialist: askSpecialist } : {}),
     }
     // The user addressed a specialist (a tab, a mention): the question is its — Axl asks it rather than answering.
@@ -272,7 +286,7 @@ ${audienceBlock}` : ''}` },
     const raw = await _run({
         log: LOG, requestedModel, userId,
         messages: conversation, systemPrompt,
-        tools: askSpecialist ? TOOLS : TOOLS_NO_SPECIALIST, toolHandlers,
+        tools: toolsForUser(userId, { specialist: Boolean(askSpecialist) }), toolHandlers,
         reasoningEffort, signal, onToken,
         tagCaptures: buildTagCaptures({
             ...route.captures,

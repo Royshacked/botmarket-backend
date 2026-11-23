@@ -2695,6 +2695,29 @@
                     "id"
                 ]
             }
+        },
+        {
+            "name": "get_situation",
+            "description": "The house's SITUATION NETWORK — the current state of the world grown into a network of what could happen next, with probabilities, and which US industries the possible futures favour (summed over every path; a split industry gets no call). `view`: \"summary\" (default: the industry calls, early warnings, the open questions and their numbers, what the last update decided), \"industry\" with `name` (one industry's chances and the branches behind them), \"question\" with `name` (words from the question: its options, numbers, reasoning and links), \"scorecard\" (the forward test against its declared pass rule). It is a FORWARD TEST, untested: say so, and never turn a call into advice to buy or sell. Say the numbers as the network's, with its date.",
+            "input_schema": {
+                "type": "object",
+                "properties": {
+                    "view": {
+                        "type": "string",
+                        "enum": [
+                            "summary",
+                            "industry",
+                            "question",
+                            "scorecard"
+                        ],
+                        "description": "summary (default), one industry, one question, or the forward test's scorecard"
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "the industry's name, or words from the question (for view industry / question)"
+                    }
+                }
+            }
         }
     ],
     "echo": [

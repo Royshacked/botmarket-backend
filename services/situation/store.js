@@ -179,3 +179,20 @@ export async function addForecasts(rows, run_id, deps = _deps) {
     await db.collection(COLLECTIONS.forecasts).insertMany(rows.map(r => ({ ...r, run_id })))
     return rows.length
 }
+
+/** The complete runs, newest first, headers only (the board's history). */
+export async function listRuns({ limit = 60 } = {}, deps = _deps) {
+    const db = await deps.db()
+    return db.collection(COLLECTIONS.runs).find({ complete: true }, { projection: { _id: 0 } }).sort({ as_of: -1, finished_at: -1 }).limit(limit).toArray()
+}
+
+/** One node's numbers run by run, oldest first → `[{ run_id, as_of, kind, status, options: [{ key, p }] }]`. */
+export async function nodeHistory(node_id, deps = _deps) {
+    const db = await deps.db()
+    const rows = await db.collection(COLLECTIONS.nodes).find({ node_id }, { projection: { _id: 0, run_id: 1, status: 1, set_by: 1, options: 1 } }).toArray()
+    const runs = await db.collection(COLLECTIONS.runs).find({ run_id: { $in: rows.map(r => r.run_id) }, complete: true }, { projection: { _id: 0, run_id: 1, as_of: 1, kind: 1, finished_at: 1 } }).toArray()
+    const byRun = new Map(runs.map(r => [r.run_id, r]))
+    return rows.filter(r => byRun.has(r.run_id))
+        .map(r => ({ run_id: r.run_id, as_of: byRun.get(r.run_id).as_of, kind: byRun.get(r.run_id).kind, at: byRun.get(r.run_id).finished_at, status: r.status, set_by: r.set_by, options: r.options.map(o => ({ key: o.key, label: o.label, p: o.p })) }))
+        .sort((a, b) => String(a.at).localeCompare(String(b.at)))
+}
