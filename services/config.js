@@ -245,6 +245,15 @@ export const config = {
     // every open event through mapping, scoring and the market check. Opt-in (ECHO_PIPELINE=true) until it replaces the
     // engine's nightly forward test; a user's event in chat runs its steps either way.
     get echoPipeline()         { return _bool('ECHO_PIPELINE', 'opt-in') },
+    // THE SITUATION NETWORK (docs/design/situation-network.md, Roy 2026-11-23) — the weekly house job that grows the
+    // current state into a network of event trees and scores industries over every path. Opt-in until its forward test
+    // starts. Who may see it at all (Axl's tool, the board) is an ALLOW-LIST of user ids, not the admin role: Roy and
+    // Marce during the forward test, and Marce is a trader. Unset → nobody.
+    get situationNetwork()     { return _bool('SITUATION_NETWORK', 'opt-in') },
+    get situationUsers() {
+        const raw = _raw('SITUATION_USERS') ?? ''
+        return raw.split(',').map(s => s.trim()).filter(Boolean)
+    },
     // The candidate list's liquidity floor, dollars traded a day (20-day average; houseScan.candidates.js). A swing
     // trade has to get in and out; a long-term holding barely trades.
     get houseScanMinAdvSwing() { return _num('HOUSE_SCAN_MIN_ADV_SWING', 20e6) },
