@@ -25,3 +25,14 @@ test("an override is the admin's: a trader on the list is refused", async () => 
     await postOverride({ method: 'POST', originalUrl: '/api/situation/nodes/x/override', user: { id: '1780034546842', role: 'trader' }, params: { id: 'node_x' }, body: { p: { a: 1 } } }, res(), (e) => { err = e })
     assert.equal(err?.status, 403, 'the refusal goes to the one error handler')
 })
+
+test('access: answered for every signed-in user — true on the list, false off it (never a 404)', async () => {
+    const { getAccess } = await import('../../api/situation/situation.controller.js')
+    const keep = process.env.SITUATION_USERS
+    try {
+        process.env.SITUATION_USERS = 'roy'
+        const a = res(); getAccess({ user: { id: 'roy' } }, a)
+        const b = res(); getAccess({ user: { id: 'other' } }, b)
+        assert.deepEqual([a.code, a.body, b.code, b.body], [200, { ok: true }, 200, { ok: false }])
+    } finally { if (keep === undefined) delete process.env.SITUATION_USERS; else process.env.SITUATION_USERS = keep }
+})

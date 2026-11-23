@@ -19,6 +19,11 @@ export function gate(req, res, next) {
     next()
 }
 
+/** GET /api/situation/access → `{ ok }`: may this user see the board? (The one route off the gate.) */
+export function getAccess(req, res) {
+    res.json({ ok: canSeeSituation(req.user) })
+}
+
 /** GET /api/situation — the latest complete run, whole, and the run list. */
 export const getLatest = handle('getLatest', async (req, res) => {
     const head = await latestRun()

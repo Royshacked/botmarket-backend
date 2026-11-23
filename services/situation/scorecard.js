@@ -23,7 +23,18 @@ export const PASS = Object.freeze({ minQuestions: 100, calibrationPts: 0.10, min
 export const CONTROL = 'situation_control'
 
 const _io = { db: () => getDb(), engineDb: () => getEngineDb(), now: () => new Date() }
-export function _setIO(io) { Object.assign(_io, io) }
+export function _setIO(io) { Object.assign(_io, io); _index = null }
+
+/** 63 trading days is about 90 calendar days: before that no call has a 3-month result. */
+export const MIN_DAYS_TO_GRADE = 88
+export const INDEX_TTL_MS = 6 * 60 * 60 * 1000
+let _index = null   // { at, lines }
+async function _indexLines(edb) {
+    if (_index && Date.now() - _index.at < INDEX_TTL_MS) return _index.lines
+    const lines = await edb.collection('industry_index').find({}, { projection: { dates: 1, levels: 1 } }).toArray()
+    _index = { at: Date.now(), lines }
+    return lines
+}
 
 const mean = (xs) => (xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : null)
 const tstat = (xs) => {
@@ -111,12 +122,16 @@ export async function buildScorecard() {
     const db = await _io.db(), edb = await _io.engineDb()
     const today = _io.now().toISOString().slice(0, 10)
     const P = { projection: { _id: 0 } }
-    const [forecasts, runs, index, control] = await Promise.all([
+    const [forecasts, runs, control] = await Promise.all([
         db.collection(COLLECTIONS.forecasts).find({ outcome: { $in: [0, 1] } }, P).toArray(),
         db.collection(COLLECTIONS.runs).find({ complete: true }, P).sort({ as_of: 1 }).toArray(),
-        edb.collection('industry_index').find({}, { projection: { dates: 1, levels: 1 } }).toArray(),
         db.collection(CONTROL).find({}, P).sort({ as_of: 1 }).toArray(),
     ])
+    // The basket lines are ~3 MB (28 s over the M0 link, the 2026-11-23 drive): read only once a call is old enough to
+    // grade (3 months), and kept for INDEX_TTL_MS.
+    const oldest = [runs[0]?.as_of, control[0]?.as_of].filter(Boolean).sort()[0] ?? null
+    const gradable = oldest && (Date.parse(`${today}T00:00:00Z`) - Date.parse(`${oldest}T00:00:00Z`)) / 864e5 >= MIN_DAYS_TO_GRADE
+    const index = gradable ? await _indexLines(edb) : []
     // One scored date per week: the last complete run of each as-of date.
     const lastOf = new Map()
     for (const r of runs) lastOf.set(r.as_of, r.run_id)

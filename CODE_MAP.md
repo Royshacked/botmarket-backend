@@ -1302,12 +1302,14 @@ services/
                             re-scored, both numbers logged as forecasts).
   (monitoring/situationNetwork.monitor.service.js — hourly, eager; SITUATION_NETWORK opt-in.)
   situation/scorecard.js    the forward test (buildScorecard): nodeScores (Brier vs equal odds, calibration buckets; groups
-                            accepted / overridden / Roy's), spreads (long ≥ 60% − short ≥ 60% vs the equal-weight basket
+                            accepted / overridden / Roy's), spreads (long ≥ 60% − short ≥ 60% vs the equal-weight basket; the ~3 MB basket
+                            lines read only once a call is 88+ days old, cached 6 h —
                             average at 63 / 126 bars), the declared verdict (5 checks). control.js: the plain question
                             weekly, no network (`situation_control`), scored the same way.
   tools/situation.tools.js  get_situation (Axl; ALLOW-LIST only — axl.agent toolsForUser drops it for everyone else):
                             summary / industry / question / scorecard, read-only from the latest run; "untested" said.
-  api/situation/            the board's API (allow-list gate → 404 off it): GET / (latest run whole + runs), /runs/:id,
+  api/situation/            the board's API: GET /access → { ok } for every signed-in user; the rest behind the allow-list
+                            gate (404 off it): GET / (latest run whole + runs), /runs/:id,
                             /nodes/:id/history, /scorecard; POST /nodes/:id/override (admin) → review.overrideNode.
   engineDb.js               THE rule for which database aether-engine writes (AETHER_DB, else Node's own) —
                             shared by every desk that reads what it wrote
