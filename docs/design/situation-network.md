@@ -1,6 +1,6 @@
 # The situation network: from "what is now" to "what is next"
 
-> Roy, 2026-11-22/23. Design only: nothing is built. Scope now: industries only (§7 deferred, §11.8). A clean start; it does not lean on the industry
+> Roy, 2026-11-22/23. **BUILT 2026-11-23** (all 15 plan steps; pushed, off until SITUATION_NETWORK=true). Scope: industries only (§7 deferred, §11.8). **Forward test start: not yet** — write the date here the day it starts. A clean start; it does not lean on the industry
 > tests or the desks, except where §9 names a piece to reuse.
 > Illustration: the end-of-2024 network (artifact "Situation network, 31 Dec 2024").
 

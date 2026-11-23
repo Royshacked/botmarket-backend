@@ -732,6 +732,36 @@ pick.
 - **Not wired** (Roy's calls): options implied volatility (no provider — a note for the future); earnings call
   transcripts (FMP 402 — SEC filings instead).
 
+### The situation network — what is next, scored over every path (2026-11-23)
+
+**Design** [docs/design/situation-network.md](docs/design/situation-network.md), **plan**
+[situation-network-plan.md](docs/design/situation-network-plan.md). Not a desk: a house job (`services/situation/`) with
+Axl as its voice and a board, for an **allow-list** only (`SITUATION_USERS`: Roy and Marce during the forward test —
+`canSeeSituation`, never the admin role; everyone else gets no tool, no menu, a 404). Industries only; the company stage
+is deferred.
+
+- **The state** (`state.js`): a dated snapshot — regime, prices, money and calendar by code (`state.data.js`), policy,
+  stories and geopolitics by one Opus call over the week's dated news (`news.js`: Echo's readers + GNews); every item
+  dated, sourced, fact or reading; no "priced in". It asks 15–35 questions.
+- **The network** (`network.js`, `propagate.js`): three runs → median probabilities, signposts, givens (trees), links
+  branch → option as log-odds shifts. Cap of 20 OPEN nodes; settled nodes outside it with a dormant branch; a dropped list
+  with reasons. A link moves its target by how far its source MOVED since the target was set; spreading runs until it
+  settles (≤ 10 rounds).
+- **Industries** (`exposure.js`, `industries.js`): each branch mapped to ≤ 8 industries from measured exposure (beta, the
+  10-year / Brent / dollar slopes) and past reactions (declared events; `industry_reactions`); 5000 seeded samples of the
+  network give each industry's chance of winning and losing, its size and agreement. No trades: would-be entries at
+  30/50/70% are logged.
+- **The loop** (`watch.js`, `monitoring/situationNetwork.monitor.service.js`, opt-in `SITUATION_NETWORK`): first build,
+  weekly update, monthly rebuild (fresh questions arrive as candidates — node identity carries on), a three-hourly news
+  triage that may call one event update a day inside `SITUATION_WEEKLY_USD` ($10). Every update logs a decision per
+  news item (moves / new option / new question / resolves / outside / none), wakes dormant branches (early warnings, beside
+  the scores) and holds the cap.
+- **Roy's review** (`review.js`): a card after each run (moved > 10 points, drift since his last review, new, woken,
+  resolved); silence accepts; an override is a new run with both numbers logged.
+- **The forward test** (`scorecard.js`, `control.js`): Brier against equal odds, calibration, industry long − short at 3
+  and 6 months, the plain-question control; the pass rule declared before the start.
+- **The app**: `/api/situation` (`/access` for everyone; the rest gated), Axl's `get_situation`, the Floor's Situation board.
+
 ### Off-hours: nothing executes while the venue is shut
 
 **RULE (2026-08-07): nothing executes off-hours, paper included.** A real market order cannot fill
@@ -881,6 +911,10 @@ the Nasdaq-100 as the **US100 cash CFD**, but levels are read off the **NQ futur
 - `echo_handoffs` — one row per house event whose flagged names went to Prometheus (Proteus too, before 2026-11-21) (`{ _id: eventId, at, names }`).
 - (retired 2026-11-19: `echo_forward`, the engine's forward test, no longer read; `echo_user_events`, replaced by
   `echo_events`.)
+- `situation_runs` · `situation_states` · `situation_nodes` · `situation_links` · `situation_dropped` · `situation_industries` ·
+  `situation_forecasts` · `situation_outside` — the situation network, one document per record per run (`run_id`); a run is
+  written whole and then marked complete (`services/situation/store.js`). `situation_watch` — the news watcher's state;
+  `situation_control` — the plain-question control per date. `industry_reactions` (engine db) — the declared past events.
 - `stock_profiles` — Proteus v2's profile per symbol (`{ symbol, version, scales: {day, swing, long}, built: {day, swing, long} }`),
   the house's; each scale valid 7 days (the day scale 1 day) from its `built` stamp; a version bump rebuilds
   (`services/stockProfile.service.js`). Replaced ~~`proteus_profiles`~~ 2026-11-21 (dropped on axl_dev; prod pending).
