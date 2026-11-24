@@ -28,7 +28,9 @@ test('summary: the calls, the early warnings, open and settled questions, the la
 test('industry: its chances and the branches behind, with why; an unknown name lists what is scored', () => {
     const s = formatIndustry(run, 'oil')
     assert.match(s, /wins 62%, loses 10%/)
-    assert.match(s, /"Does the US strike Iran by end of Q1\?" → Strikes: helps — oil spikes/)
+    assert.match(s, /"Does the US strike Iran by end of Q1\?" \(resolves by 2025-03-31\) → Strikes: helps — oil spikes/)
+    assert.match(s, /size medium \(how big the average push[\s\S]*not a position size\)/)
+    assert.match(s, /HORIZON: there is no single one[\s\S]*3 and 6 months/)
     assert.match(formatIndustry(run, 'banks'), /scores no industry matching "banks"/)
 })
 

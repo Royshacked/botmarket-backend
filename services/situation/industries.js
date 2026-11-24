@@ -176,7 +176,10 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
     for (const l of links) if (l.live !== false) { if (!into.has(l.to.node_id)) into.set(l.to.node_id, []); into.get(l.to.node_id).push(l) }
     const names = new Map(industries.map(i => [i.code, i.name]))
     const levels = new Map(industries.map(i => [i.code, i.level]))
-    const codes = [...new Set([...effects.values()].flat().map(e => e.code))]
+    // Only what a sample can draw: a dropped or split question's effects never fire, and an industry mapped only there
+    // came out 0% / 0% with no path (prod, 2026-11-24: Rail and Cargo Ground, from a question dropped that run).
+    const drawable = order.flatMap(n => n.options.map(o => effects.get(`${n.node_id}|${o.key}`) ?? []))
+    const codes = [...new Set(drawable.flat().map(e => e.code))]
     const win = new Map(codes.map(c => [c, 0])), lose = new Map(codes.map(c => [c, 0])), sumNet = new Map(codes.map(c => [c, 0]))
     const contrib = new Map(codes.map(c => [c, new Map()]))   // code → "node|option" → signed weight × count
     const rand = rng(seed)
@@ -219,7 +222,8 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
         const paths = [...contrib.get(code).entries()].map(([k, v]) => {
             const [node_id, option] = k.split('|')
             const n = map.get(node_id)
-            return { node_id, option, question: n?.question ?? null, label: n?.options.find(o => o.key === option)?.label ?? option, weight: v / samples }
+            // The horizon of this branch: its question resolves by this date (the network has no single horizon).
+            return { node_id, option, question: n?.question ?? null, label: n?.options.find(o => o.key === option)?.label ?? option, weight: v / samples, resolve_by: n?.resolve_by ?? null }
         }).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)).slice(0, 6)
         return {
             level: levels.get(code) ?? 'sub_industry', code, name: names.get(code) ?? code, p_win: pw, p_lose: pl,

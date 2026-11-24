@@ -138,3 +138,37 @@ test('wouldBeEntries: an upward crossing of 30 / 50 / 70%, either side', () => {
     const e = wouldBeEntries([{ code: 'G', p_win: 0.45, p_lose: 0.1 }], [{ code: 'G', name: 'Gold', p_win: 0.72, p_lose: 0.1 }, { code: 'N', name: 'New', p_win: 0.1, p_lose: 0.35 }], '2025-01-07')
     assert.deepEqual(e.map(x => `${x.code} ${x.side} ${x.level}`), ['G win 0.5', 'G win 0.7', 'N lose 0.3'])
 })
+
+// Prod, 2026-11-24 (Roy, on the Industries tab): Rail and Cargo Ground at 0% / 0% with no path, and Axl naming "a 61% call
+// under the code 20101010".
+test("an industry mapped only on a dropped question gets no row; each path carries its question's resolve-by date", () => {
+    const live = { ...node('boeing', { yes: 0.6, no: 0.4 }), resolve_by: '2027-06-30' }
+    const gone = { ...node('old', { a: 0.5, b: 0.5 }), status: 'dropped' }
+    const effects = new Map([['boeing|yes', [{ code: 'AD', direction: 'up', bucket: 'medium' }]], ['boeing|no', []], ['old|a', [{ code: 'RAIL', direction: 'up', bucket: 'small' }]], ['old|b', []]])
+    const rows = scoreIndustries([live, gone], [], effects, [{ code: 'AD', name: 'Aerospace & Defense', level: 'sub_industry' }, { code: 'RAIL', name: 'Rail', level: 'sub_industry' }], { samples: 2000 })
+    assert.deepEqual(rows.map(r => r.code), ['AD'])
+    assert.equal(rows[0].paths[0].resolve_by, '2027-06-30')
+})
+
+test("buildExposures names every basket from the engine's latest timing rows when the passed names lack it or are a bare code", async () => {
+    const { memDb } = await import('../helpers/memDb.js')
+    const { db } = memDb()
+    const dates = ['2026-10-01', '2026-10-08', '2026-10-15']
+    await db.collection('industry_index').insertMany([
+        { _id: 'sub_industry:20101010', dates, levels: [1, 1.01, 1.02] },
+        { _id: 'sub_industry:45103020', dates, levels: [1, 0.99, 1.01] },
+        { _id: 'sub_industry:10102010', dates, levels: [1, 1, 1] },
+    ])
+    await db.collection('industry_timing').insertMany([
+        { _id: 'a', asof: '2026-11-13', basket: 'sub_industry:20101010', basket_name: 'OLD NAME' },
+        { _id: 'b', asof: '2026-11-20', basket: 'sub_industry:20101010', basket_name: 'Aerospace & Defense' },
+        { _id: 'c', asof: '2026-11-20', basket: 'sub_industry:45103020', name: 'Systems Software' },
+    ])
+    setExposureIO({ engineDb: async () => db, spx: async () => [], series: async () => [] })
+    const passed = new Map([['sub_industry:20101010', '20101010'], ['sub_industry:10102010', 'Integrated Oil & Gas']])
+    const r = await buildExposures(passed)
+    const name = (code) => r.industries.find(i => i.code === code)?.name
+    assert.equal(name('20101010'), 'Aerospace & Defense', 'a bare code passed in is replaced')
+    assert.equal(name('45103020'), 'Systems Software', 'missing from the passed names')
+    assert.equal(name('10102010'), 'Integrated Oil & Gas', 'a passed name stands')
+})

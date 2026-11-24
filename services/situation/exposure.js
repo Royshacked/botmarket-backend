@@ -144,6 +144,14 @@ export function exposureLine(ind) {
 
 // ─── the build ────────────────────────────────────────────────────────────────
 
+/** basket → name, from the engine's latest `industry_timing` rows. */
+async function latestNames(db) {
+    const last = (await db.collection('industry_timing').find({}, { projection: { asof: 1 } }).sort({ asof: -1 }).limit(1).toArray())[0]
+    if (!last) return new Map()
+    const rows = await db.collection('industry_timing').find({ asof: last.asof }, { projection: { basket: 1, basket_name: 1, name: 1 } }).toArray()
+    return new Map(rows.filter(r => r.basket).map(r => [r.basket, r.basket_name ?? r.name]).filter(([, n]) => n))
+}
+
 /**
  * Every basket's evidence → `{ industries: [{ basket, level, code, name, sens, reactions }], events, gaps }`. Monthly
  * reactions are matched to a basket by its GICS industry (the first 6 digits). Never throws.
@@ -163,6 +171,9 @@ export async function buildExposures(names = new Map()) {
     const factorsW = { rates: weekly(dgs10), oil: weekly(brent), dollar: weekly(usd) }
     const daily = dailyReactions(docs)
     const monthly = await guard('industry_reactions', () => db.collection('industry_reactions').find({}).toArray(), [])
+    // Every basket's name from the engine's latest timing rows, under the names passed in: the passed names come from the
+    // previous run on an update, so a code that was ever unnamed stayed a bare code ("20101010" — prod, 2026-11-24).
+    const known = await guard('industry names', () => latestNames(db), new Map())
     if (!monthly.length) gaps.push('industry_reactions: none seeded (run aether-engine scripts/seed_industry_reactions.py)')
     const industries = docs.map(d => {
         const [level, code] = String(d._id).split(':')
@@ -171,7 +182,8 @@ export async function buildExposures(names = new Map()) {
             ...daily.map(e => ({ id: e.id, label: e.label, v: e.rows.find(r => r.basket === d._id)?.d5 })).filter(r => typeof r.v === 'number'),
             ...monthly.map(e => ({ id: e._id, label: `${e.label} (${e.month})`, v: e.rows.find(r => r.code === code.slice(0, 6))?.excess })).filter(r => typeof r.v === 'number'),
         ]
-        return { basket: d._id, level, code, name: names.get(d._id) ?? code, sens, reactions }
+        const passed = names.get(d._id)
+        return { basket: d._id, level, code, name: (passed && passed !== code ? passed : null) ?? known.get(d._id) ?? code, sens, reactions }
     })
     return { industries, events: [...daily.map(e => ({ id: e.id, label: e.label, date: e.date })), ...monthly.map(e => ({ id: e._id, label: e.label, month: e.month }))], gaps }
 }

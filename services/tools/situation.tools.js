@@ -53,11 +53,13 @@ export function formatIndustry(run, name) {
     if (!r) return `The network scores no industry matching "${name}". It scores ${run.industries.length}: ${run.industries.slice(0, 15).map(x => x.name).join(', ')}…`
     const nodes = new Map(run.nodes.map(n => [n.node_id, n]))
     const why = (p) => nodes.get(p.node_id)?.options.find(o => o.key === p.option)?.effects?.find(e => e.code === r.code)?.why ?? null
+    const resolveBy = (p) => p.resolve_by ?? nodes.get(p.node_id)?.resolve_by ?? null
     return [
-        `${r.name} (${run.run.as_of}): wins ${pct(r.p_win)}, loses ${pct(r.p_lose)} over every path; size ${r.bucket}; ${r.agreement != null ? `${pct(r.agreement)} of the paths that move it agree` : 'no path moves it'}.`,
+        `${r.name} (${run.run.as_of}): wins ${pct(r.p_win)}, loses ${pct(r.p_lose)} over every path; size ${r.bucket} (how big the average push on it is — the mapped effects added up over every path; not a position size); ${r.agreement != null ? `${pct(r.agreement)} of the paths that move it agree` : 'no path moves it'}.`,
+        'HORIZON: there is no single one — each branch below is decided by the resolve-by date of its question; the forward test grades the calls at 3 and 6 months.',
         r.macro ? `The macro layer alone: wins ${pct(r.macro.p_win)}, loses ${pct(r.macro.p_lose)} (the rest is the sector layer).` : null,
         'BEHIND IT (the branches that move it most):',
-        ...r.paths.map(p => `- "${p.question}" → ${p.label}: ${p.weight >= 0 ? 'helps' : 'hurts'}${why(p) ? ` — ${why(p)}` : ''}`),
+        ...r.paths.map(p => `- "${p.question}"${resolveBy(p) ? ` (resolves by ${resolveBy(p)})` : ''} → ${p.label}: ${p.weight >= 0 ? 'helps' : 'hurts'}${why(p) ? ` — ${why(p)}` : ''}`),
         (r.early_warning ?? []).length ? `EARLY WARNING: ${r.early_warning.map(w => `${nodes.get(w.node_id)?.question} → ${w.option} would ${w.direction === 'up' ? 'help' : 'hurt'} it`).join('; ')}` : null,
         'A forward test: untested, not advice.',
     ].filter(Boolean).join('\n')
