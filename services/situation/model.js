@@ -23,7 +23,7 @@ export const NODE_STATUSES = Object.freeze(['live', 'resolved', 'dropped', 'spli
 export const SET_BY = Object.freeze(['llm', 'roy'])
 export const CONFIDENCE = Object.freeze(['low', 'high'])
 export const BUCKETS = Object.freeze(['small', 'medium', 'large'])
-export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap'])
+export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'reworded'])
 export const EVENT_DECISIONS = Object.freeze(['moves_option', 'new_option', 'new_question', 'resolves', 'outside'])
 
 /** A settled node has one option at or above this; below it the node is open (§3: "one option dominates"). */
@@ -167,7 +167,8 @@ export function checkNode(input = {}) {
         if (!options.some(o => o.key === r.option)) return bad(`"${question.slice(0, 40)}": a resolved node names the option that happened`)
         if (!text(r.evidence, 600)) return bad(`"${question.slice(0, 40)}": a resolution needs its evidence`)
         if (!realDate(r.on)) return bad(`"${question.slice(0, 40)}": a resolution needs its date`)
-        resolved = { option: r.option, evidence: text(r.evidence, 600), on: r.on, by: SET_BY.includes(r.by) ? r.by : 'llm' }
+        // UNFORESEEN: what happened was not what its options assumed (situation-network-outcomes.md §3) — counted.
+        resolved = { option: r.option, evidence: text(r.evidence, 600), on: r.on, by: SET_BY.includes(r.by) ? r.by : 'llm', unforeseen: r.unforeseen === true }
     }
     if (input.confidence != null && !CONFIDENCE.includes(input.confidence)) return bad('confidence must be low or high')
     // The numbers at Roy's last review — the drift rule's baseline (§11.1): the card shows a node that has moved more
@@ -310,7 +311,10 @@ export function checkOutside(input = {}) {
     if (!realDate(input.date)) return bad('an outside event needs its date')
     const industries = (Array.isArray(input.industries) ? input.industries : []).map(i => text(i, 120)).filter(Boolean)
     if (!industries.length) return bad('an outside event names the industry it hits')
-    return ok({ event_id: input.event_id ?? newId('out'), date: input.date, text: what, industries, source: text(input.source, 300) || null, promoted_to: null })
+    // The sectors it hits (codes): the macro call's outside stories are ROUTED to those sectors' calls.
+    const sectors = (Array.isArray(input.sectors) ? input.sectors : []).filter(x => x !== MACRO && isLayer(x))
+    const routed_to = (Array.isArray(input.routed_to) ? input.routed_to : []).filter(x => sectors.includes(x))
+    return ok({ event_id: input.event_id ?? newId('out'), date: input.date, text: what, industries, sectors, routed_to, source: text(input.source, 300) || null, promoted_to: null })
 }
 
 /** A run's header (plan §1). */
@@ -322,4 +326,20 @@ export function checkRun(input = {}) {
         run_id: input.run_id ?? newId('run'), kind: input.kind, as_of: input.as_of,
         trigger: text(input.trigger, 300) || null, parent_run_id: input.parent_run_id ?? null,
     })
+}
+
+/** A probabilities list over a node's option keys → numbers summing to 1, or null if it does not fit. Pure. */
+export function fitProbabilities(keys, list) {
+    const m = new Map((list ?? []).map(x => [x.option, Math.max(0, Number(x.value) || 0)]))
+    const xs = keys.map(k => m.get(k) ?? 0)
+    const s = xs.reduce((a, b) => a + b, 0)
+    return s > 0 ? xs.map(x => x / s) : null
+}
+
+/** A live node whose numbers were just SET → its kind and dormant flags from them. Pure. */
+export function withKind(n) {
+    if (n.status !== 'live') return n
+    const top = n.options.reduce((a, b) => (b.p > a.p ? b : a))
+    const kind = top.p >= SETTLED_AT ? 'settled' : 'open'
+    return { ...n, kind, options: n.options.map(o => ({ ...o, dormant: kind === 'settled' && o.key !== top.key })) }
 }

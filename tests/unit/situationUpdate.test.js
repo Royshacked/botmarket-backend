@@ -6,6 +6,9 @@ import { checkBundle } from '../../services/situation/store.js'
 import { holdCaps } from '../../services/situation/layers.js'
 import { anchorFor } from '../../services/situation/propagate.js'
 
+// The missing-outcomes review never reaches the model from a test.
+_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }) })
+
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`)
 const node = (node_id, opts, over = {}) => ({
     node_id, tree: 'tariffs_trade', question: `Q ${node_id}?`, status: 'live', kind: 'open', impact: 'high', given: null, anchor: null, review: null, woken: [],

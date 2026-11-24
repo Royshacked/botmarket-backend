@@ -5,6 +5,9 @@ import { numbered, applyAnswer, runUpdate, withDescendants, refreshSections, isC
 import { checkBundle } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
 
+// The missing-outcomes review never reaches the model from a test.
+_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }) })
+
 // The code review's fixes (2026-11-23, Roy: "fix all").
 
 const node = (node_id, opts, over = {}) => ({

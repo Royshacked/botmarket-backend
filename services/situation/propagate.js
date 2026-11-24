@@ -92,9 +92,9 @@ export function treePaths(nodes, rootId, { max = 2000 } = {}) {
 }
 
 /** Resolve a node to the option that happened → a new nodes array (the node 100% on it, status resolved). Pure. */
-export function resolve(nodes, id, option, { evidence = '', on = null, by = 'llm' } = {}) {
+export function resolve(nodes, id, option, { evidence = '', on = null, by = 'llm', unforeseen = false } = {}) {
     return nodes.map(n => (n.node_id !== id ? n : {
-        ...n, status: 'resolved', resolved: { option, evidence, on, by },
+        ...n, status: 'resolved', resolved: { option, evidence, on, by, unforeseen },
         options: n.options.map(o => ({ ...o, p: o.key === option ? 1 : 0 })),
     }))
 }

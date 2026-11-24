@@ -119,6 +119,11 @@ export function onePerWeek(items) {
     return [...m.values()]
 }
 
+/** Graded rows → `{ questions, of }`: how many resolved questions were won by an option a forecast lacked. Pure. */
+export function unforeseenCount(rows) {
+    return { questions: new Set(rows.filter(r => r.absent).map(r => r.node_id)).size, of: new Set(rows.map(r => r.node_id)).size }
+}
+
 export const SCORED_KINDS = Object.freeze(['build', 'rebuild', 'weekly', 'sectors'])
 /** The runs the industry test scores: per ISO week, the latest scheduled run (runs oldest first). Pure. */
 export function scoredRuns(runs) {
@@ -173,9 +178,12 @@ export async function buildScorecard() {
     const nodes = nodeScores(counted)
     // Brier per layer: the macro questions, and every sector's together (a row from before the layers is macro).
     const layers = { macro: nodeScores(counted.filter(f => (f.layer ?? 'macro') === 'macro')).all, sectors: nodeScores(counted.filter(f => (f.layer ?? 'macro') !== 'macro')).all }
+    // UNFORESEEN (situation-network-outcomes.md §4): resolved questions won by an outcome some forecast of theirs did not have
+    // as an option (the grading's `absent` rows). The missing-outcomes review works if this share falls.
+    const unforeseen = unforeseenCount(counted)
     const net = { m3: spreadSummary(spreads(calls, index, HORIZONS.m3)), m6: spreadSummary(spreads(calls, index, HORIZONS.m6)) }
     const macroOnly = { m3: spreadSummary(spreads(macroCalls, index, HORIZONS.m3)), m6: spreadSummary(spreads(macroCalls, index, HORIZONS.m6)) }
     const plain = { m3: spreadSummary(spreads(ctrl, index, HORIZONS.m3)), m6: spreadSummary(spreads(ctrl, index, HORIZONS.m6)) }
     const startedOn = runs.find(r => r.kind === 'build')?.as_of ?? null
-    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, industries: net, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
+    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, unforeseen, industries: net, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
 }

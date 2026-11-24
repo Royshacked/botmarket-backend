@@ -770,6 +770,12 @@ is deferred.
   questions, so the picture never lags the network. A promoted question keeps its origin: graded, and counted in
   "macro alone", by the layer it was born in. Industries are scored over both layers and over the macro layer alone;
   the scorecard grades each layer.
+  MISSING OUTCOMES (docs/design/situation-network-outcomes.md, 2026-11-24): every weekly update and rebuild runs a separate
+  review that attacks each question's options (a plausible outcome missing, or two lumped that move industries differently)
+  and adds the option or rewords the question; an added option is mapped and linked like any. At resolution the update
+  checks what happened against what the option ASSUMED: a mismatch is added as its own option, resolved to, and flagged
+  NOT FORESEEN; the scorecard counts such questions (a forecast that lacked the winning option is graded as 0% on it). A
+  macro call's "outside" story names its sectors and is routed to those sectors' calls (the macro call runs first).
   A network built before the layer gets it added (a `sectors` run). The board filters by layer.
 - **The app**: `/api/situation` (`/access` for everyone; the rest gated), Axl's `get_situation`, the Floor's Situation board.
 

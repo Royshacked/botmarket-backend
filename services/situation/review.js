@@ -40,11 +40,13 @@ export function cardLines(run) {
         for (const n of run.nodes.filter(x => x.kind === 'open' && x.status === 'live' && (!sectorsOnly || layerOf(x) !== 'macro'))) lines.push(`• ${where(n)}${n.question} — ${opts(n)}`)
         return { title: sectorsOnly ? `The sector layer is built (${run.run.as_of}): ${lines.length} open sector questions to review` : `The situation network is built (${run.run.as_of}): ${lines.length} open questions to review`, lines }
     }
-    const label = { moved: 'moved', drift: 'drifted since your last review', new: 'new', woken: 'EARLY WARNING — a dormant branch woke', resolved: 'resolved', promoted: 'moved up to the macro layer' }
+    const label = { moved: 'moved', drift: 'drifted since your last review', new: 'new', woken: 'EARLY WARNING — a dormant branch woke', resolved: 'resolved', promoted: 'moved up to the macro layer', reworded: 'reworded by the outcomes review' }
+    const unforeseen = new Set(run.run.stats?.unforeseen ?? [])
     for (const it of run.run.stats?.review ?? []) {
         const n = nodes.get(it.node_id)
         if (!n) continue
-        if (it.why === 'resolved') lines.push(`• Resolved: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option}`)
+        if (it.why === 'resolved') lines.push(`• Resolved: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option}${unforeseen.has(n.node_id) ? ' (NOT FORESEEN: its options did not have what happened)' : ''}`)
+        else if (it.why === 'outcome_added') lines.push(`• Outcome added: ${where(n)}${n.question} + "${n.options.find(o => o.key === it.option)?.label ?? it.option}" — ${opts(n)}`)
         else if (it.why === 'woken') lines.push(`• ${label.woken}: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option} (${pct(n.options.find(o => o.key === it.option)?.p ?? 0)})`)
         else lines.push(`• ${where(n)}${n.question} (${label[it.why] ?? it.why}${it.by ? `, ${Math.round(it.by * 100)} pts` : ''}) — ${opts(n)}`)
     }

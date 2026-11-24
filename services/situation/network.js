@@ -253,32 +253,41 @@ export function linksSchema() {
     return { type: 'object', additionalProperties: false, required: ['links'], properties: { links: networkSchema().properties.links } }
 }
 
-/** The live nodes numbered, the new ones marked NEW. Pure. */
-export function linksPrompt(nodes, newIds) {
+const optKey = (node_id, option) => `${node_id}|${option}`
+
+/** The live nodes numbered, the new ones marked NEW, and a NEW option on an old question marked too. Pure. */
+export function linksPrompt(nodes, newIds, newOptions = []) {
     const fresh = new Set(newIds)
+    const freshOpt = new Set(newOptions.map(x => optKey(x.node_id, x.option)))
     return [`THE QUESTIONS (${nodes.length}):`,
-        ...nodes.map((n, i) => `${i + 1}. ${fresh.has(n.node_id) ? 'NEW ' : ''}[${layerName(layerOf(n))} · ${n.tree}] ${n.question}\n   options: ${n.options.map(o => `${o.key} = ${o.label}`).join('; ')}`),
-        '', 'Give the links that start or end on a NEW question.'].join('\n')
+        ...nodes.map((n, i) => `${i + 1}. ${fresh.has(n.node_id) ? 'NEW ' : ''}[${layerName(layerOf(n))} · ${n.tree}] ${n.question}\n   options: ${n.options.map(o => `${o.key} = ${o.label}${freshOpt.has(optKey(n.node_id, o.key)) ? ' (NEW option)' : ''}`).join('; ')}`),
+        '', newOptions.length
+            ? "Give the links that start or end on a NEW question or a NEW option (an old question's other options keep the links they have)."
+            : 'Give the links that start or end on a NEW question.'].join('\n')
 }
 
 /**
  * The links for `newIds` among the live `nodes` → `{ ok, links, cost_usd }`: each link from or to a new node, between two
- * different live nodes, on options that exist, its strength as a log-odds shift. Never throws.
+ * different live nodes, on options that exist, its strength as a log-odds shift. `newOptions` (`[{ node_id, option }]`):
+ * options ADDED to old questions — an option shapes the links from the day it exists (Roy, 2026-11-24), so it gets its
+ * own. Never throws.
  */
-export async function linksFor(nodes, newIds) {
+export async function linksFor(nodes, newIds = [], newOptions = []) {
     const live = nodes.filter(n => n.status === 'live')
-    if (!newIds?.length || live.length < 2) return { ok: true, links: [], cost_usd: 0 }
+    if ((!newIds?.length && !newOptions?.length) || live.length < 2) return { ok: true, links: [], cost_usd: 0 }
     let cost = 0, payer = null
     try { payer = await _io.payer() } catch { /* unbooked */ }
     try {
-        const res = await _io.call({ model: NETWORK_MODEL, effort: LINKS_EFFORT, systemPrompt: LINKS_SYSTEM, user: linksPrompt(live, newIds), schema: linksSchema(),
+        const res = await _io.call({ model: NETWORK_MODEL, effort: LINKS_EFFORT, systemPrompt: LINKS_SYSTEM, user: linksPrompt(live, newIds, newOptions), schema: linksSchema(),
             onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
         const fresh = new Set(newIds)
+        const freshOpt = new Set(newOptions.map(x => optKey(x.node_id, x.option)))
+        const isNew = (n, option) => fresh.has(n.node_id) || freshOpt.has(optKey(n.node_id, option))
         const at = (k) => live[k - 1]
         const links = []
         for (const l of res?.data?.links ?? []) {
             const f = at(l.from?.question), t = at(l.to?.question)
-            if (!f || !t || f.node_id === t.node_id || !(fresh.has(f.node_id) || fresh.has(t.node_id))) continue
+            if (!f || !t || f.node_id === t.node_id || !(isNew(f, l.from?.option) || isNew(t, l.to?.option))) continue
             if (!f.options.some(o => o.key === l.from.option) || !t.options.some(o => o.key === l.to.option)) continue
             const shift = (STRENGTH_SHIFT[l.strength] ?? STRENGTH_SHIFT.small) * (l.direction === 'lowers' ? -1 : 1)
             const lag = Number.isInteger(l.lag_days?.min) && Number.isInteger(l.lag_days?.max) && l.lag_days.min >= 0 && l.lag_days.min <= l.lag_days.max ? l.lag_days : null

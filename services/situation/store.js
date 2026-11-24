@@ -8,7 +8,7 @@
 // on Render only.
 
 import { getDb } from '../../providers/mongodb.provider.js'
-import { checkRun, checkState, checkSectorState, checkNode, checkLink, checkDropped, checkIndustry, checkForecast, checkOutside } from './model.js'
+import { checkRun, checkState, checkSectorState, checkNode, checkLink, checkDropped, checkIndustry, checkForecast, checkOutside, newId } from './model.js'
 
 export const COLLECTIONS = Object.freeze({
     runs: 'situation_runs', states: 'situation_states', nodes: 'situation_nodes', links: 'situation_links',
@@ -161,6 +161,23 @@ export async function readRun(run_id, deps = _deps) {
 }
 
 /**
+ * The graded rows a resolution owes for runs whose forecast lacked the option that happened → one row per such run, p 0,
+ * outcome 1, `absent: true`. Open rows are `{ forecast_id, run_id, node_id?, option, p, set_by?, llm_p?, layer?, resolve_by? }`. Pure.
+ */
+export function absentRows(open, option, on) {
+    const byRun = new Map()
+    for (const f of open) { if (!byRun.has(f.run_id)) byRun.set(f.run_id, []); byRun.get(f.run_id).push(f) }
+    const out = []
+    for (const [run_id, rows] of byRun) {
+        if (rows.some(f => f.option === option)) continue
+        const f = rows[0]
+        out.push({ forecast_id: newId('fc'), run_id, node_id: f.node_id, option, p: 0, set_by: f.set_by ?? 'llm', llm_p: f.set_by === 'roy' ? 0 : null,
+            reviewed: false, resolve_by: f.resolve_by ?? null, layer: f.layer ?? 'macro', outcome: 1, resolved_on: on, brier: 1, absent: true })
+    }
+    return out
+}
+
+/**
  * Grade every logged forecast of a node once it resolved (§9): outcome 1 for the option that happened, 0 for the rest,
  * and its Brier term (p − outcome)². Only forecasts not graded yet. → the number graded.
  */
@@ -168,7 +185,7 @@ export async function gradeForecasts(node_id, option, on, deps = _deps) {
     if (!node_id || !option) return 0
     const db = await deps.db()
     const coll = db.collection(COLLECTIONS.forecasts)
-    const rows = await coll.find({ node_id, outcome: null }, { projection: { _id: 0, forecast_id: 1, option: 1, p: 1, run_id: 1 } }).toArray()
+    const rows = await coll.find({ node_id, outcome: null }, { projection: { _id: 0, forecast_id: 1, node_id: 1, option: 1, p: 1, run_id: 1, set_by: 1, layer: 1, resolve_by: 1 } }).toArray()
     // Only forecasts of runs saved WHOLE: a save that failed part-way leaves rows no run stands behind.
     const runIds = [...new Set(rows.map(r => r.run_id))]
     const complete = new Set((await db.collection(COLLECTIONS.runs).find({ run_id: { $in: runIds }, complete: true }, { projection: { _id: 0, run_id: 1 } }).toArray()).map(r => r.run_id))
@@ -177,7 +194,12 @@ export async function gradeForecasts(node_id, option, on, deps = _deps) {
         const outcome = f.option === option ? 1 : 0
         await coll.updateOne({ forecast_id: f.forecast_id, outcome: null }, { $set: { outcome, resolved_on: on, brier: (f.p - outcome) ** 2 } })
     }
-    return open.length
+    // A run whose forecast had NO such option (it was added later — by an update, the outcomes review or the resolution
+    // check) gave what happened 0%: one row says so, or the miss would grade as a good forecast (every row it had scored
+    // against outcome 0). Marked `absent`; the scorecard counts these questions as unforeseen.
+    const missing = absentRows(open, option, on)
+    if (missing.length) await coll.insertMany(missing)
+    return open.length + missing.length
 }
 
 /** Set fields on one node of one run (Roy's override from the board or the card). → true when it matched. */

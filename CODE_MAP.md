@@ -1309,6 +1309,10 @@ services/
                             With the sector layer: + buildSectorLayer, mapByLayer (one mapping per layer group), settle
                             (promotion, caps, kept links, forecasts' final layer). buildSectors ADDS the layer to a network
                             built before it (run kind `sectors`; the macro nodes carry over unchanged).
+  situation/outcomes.js     THE MISSING-OUTCOMES REVIEW (docs/design/situation-network-outcomes.md, 2026-11-24): a separate
+                            Opus call on every weekly / rebuild over every live question (options + what each ASSUMES, its
+                            effects) → add_option (≤ 4: re-set, mapped, LINKED via linksFor's newOptions) or reword (the old
+                            question dropped as `reworded`, the new one `split_from` it); ≤ 8 changes, misfits skipped + said.
   situation/update.js       runUpdate (weekly | event | rebuild with `fresh` state + candidate questions): ONE Opus call
                             (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
                             new_question / resolves / outside / none), signposts fired, due questions → applyAnswer (live

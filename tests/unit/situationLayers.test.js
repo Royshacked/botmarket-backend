@@ -15,6 +15,9 @@ import { anchorFor } from '../../services/situation/propagate.js'
 import { cardLines } from '../../services/situation/review.js'
 import { formatSummary } from '../../services/tools/situation.tools.js'
 
+// The missing-outcomes review never reaches the model from a test.
+setUpdateIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }) })
+
 const node = (node_id, opts, over = {}) => ({
     node_id, tree: 't', question: `Q ${node_id}?`, status: 'live', kind: 'open', impact: 'high', given: null, anchor: null, review: null, woken: [],
     resolve_by: '2025-03-31', options: Object.entries(opts).map(([key, p]) => ({ key, label: key, p, signpost: `sign ${key}`, dormant: false, effects: [] })), ...over,

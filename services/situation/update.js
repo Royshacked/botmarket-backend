@@ -17,7 +17,7 @@ import { dirname, join } from 'path'
 import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
-import { checkNode, newId, SETTLED_AT, BUCKETS, KEY, snake, realDate } from './model.js'
+import { checkNode, newId, BUCKETS, KEY, snake, realDate, fitProbabilities, withKind, MAX_OPTIONS } from './model.js'
 import { propagate, resolve, anchorFor } from './propagate.js'
 import { fetchNews, fetchSectorNews, articleLines } from './news.js'
 import { buildExposures } from './exposure.js'
@@ -28,7 +28,8 @@ import { capOut, promote, anchorLinks, withMacroScores } from './layers.js'
 import { mapByLayer } from './build.js'
 import { macroBackdrop, sectorPriceItems, rewriteSectorState } from './sectorState.js'
 import { rewriteState } from './state.js'
-import { MACRO, SECTORS, layerOf, originOf, layerName, topNames } from './sectors.js'
+import { reviewOutcomes, applyOutcomes, effectLine } from './outcomes.js'
+import { MACRO, SECTORS, SECTOR_CODES, layerOf, originOf, layerName, topNames } from './sectors.js'
 import { config } from '../config.js'
 import { buildDataSections } from './state.data.js'
 import { saveRun, latestRun, readRun, gradeForecasts } from './store.js'
@@ -54,9 +55,10 @@ const _io = {
     exposures: (names) => buildExposures(names), map: (nodes, inds) => mapBranches(nodes, inds),
     sectorNews: (sector, days, asOf, names) => fetchSectorNews(sector, { days, asOf, names }), names: () => topNames(),
     rewrite: (asOf, o) => rewriteState(asOf, o),
+    outcomes: (nodes, asOf, names) => reviewOutcomes(nodes, asOf, names),
     rewriteSector: (sector, asOf, macroState, rows, articles, questions) => rewriteSectorState(sector, asOf, macroState, rows, articles, questions),
     sectorsOn: () => config.situationSectors,
-    links: (nodes, ids) => linksFor(nodes, ids), data: (asOf) => buildDataSections(asOf),
+    links: (nodes, ids, options) => linksFor(nodes, ids, options), data: (asOf) => buildDataSections(asOf),
     save: (b) => saveRun(b), grade: (nodeId, option, on) => gradeForecasts(nodeId, option, on),
 }
 export function _setIO(io) { Object.assign(_io, io) }
@@ -68,6 +70,10 @@ const nul = (s) => ({ anyOf: [s, { type: 'null' }] })
 /** The update's schema. Pure. */
 export function updateSchema() {
     const opt = { type: 'object', additionalProperties: false, required: ['key', 'label', 'signpost'], properties: { key: { type: 'string' }, label: { type: 'string' }, signpost: { type: 'string' } } }
+    // THE RESOLUTION CHECK: `fits` — does what happened match what the option ASSUMES (its effects)? Not → `unforeseen`
+    // names the outcome that did happen, as an option.
+    const check = { fits: { type: 'boolean' }, unforeseen: nul(opt) }
+    const resolution = { type: 'object', additionalProperties: false, required: ['option', 'evidence', 'fits', 'unforeseen'], properties: { option: { type: 'string' }, evidence: { type: 'string' }, ...check } }
     return {
         type: 'object', additionalProperties: false, required: ['events', 'signposts_fired', 'due'],
         properties: {
@@ -78,19 +84,20 @@ export function updateSchema() {
                     articles: { type: 'array', items: { type: 'integer' } }, summary: { type: 'string' }, reasoning: { type: 'string' },
                     decision: { type: 'string', enum: [...DECISIONS] }, node: { type: ['integer', 'null'] }, probabilities: pList,
                     new_option: nul(opt),
-                    resolution: nul({ type: 'object', additionalProperties: false, required: ['option', 'evidence'], properties: { option: { type: 'string' }, evidence: { type: 'string' } } }),
+                    resolution: nul(resolution),
                     new_question: nul({ type: 'object', additionalProperties: false,
                         required: ['question', 'tree', 'options', 'probabilities', 'impact', 'uncertainty', 'why', 'resolve_by', 'lag_days'],
                         properties: { question: { type: 'string' }, tree: { type: 'string' }, options: { type: 'array', items: opt }, probabilities: pList,
                             impact: { type: 'string', enum: ['low', 'medium', 'high'] }, uncertainty: { type: 'string', enum: ['low', 'medium', 'high'] },
                             why: { type: 'string' }, resolve_by: { type: 'string' }, lag_days: lag } }),
-                    outside: nul({ type: 'object', additionalProperties: false, required: ['text', 'industries'], properties: { text: { type: 'string' }, industries: { type: 'array', items: { type: 'string' } } } }),
+                    outside: nul({ type: 'object', additionalProperties: false, required: ['text', 'industries', 'sectors'], properties: { text: { type: 'string' }, industries: { type: 'array', items: { type: 'string' } },
+                        sectors: { type: 'array', items: { type: 'string', enum: [...SECTOR_CODES] } } } }),
                 },
             } },
             signposts_fired: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'option', 'evidence', 'articles'],
                 properties: { node: { type: 'integer' }, option: { type: 'string' }, evidence: { type: 'string' }, articles: { type: 'array', items: { type: 'integer' } } } } },
-            due: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'resolved', 'option', 'evidence', 'new_resolve_by'],
-                properties: { node: { type: 'integer' }, resolved: { type: 'boolean' }, option: { type: ['string', 'null'] }, evidence: { type: 'string' }, new_resolve_by: { type: ['string', 'null'] } } } },
+            due: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'resolved', 'option', 'evidence', 'new_resolve_by', 'fits', 'unforeseen'],
+                properties: { node: { type: 'integer' }, resolved: { type: 'boolean' }, option: { type: ['string', 'null'] }, evidence: { type: 'string' }, new_resolve_by: { type: ['string', 'null'] }, ...check } } },
         },
     }
 }
@@ -104,16 +111,19 @@ export function numbered(nodes) {
  * The update's user message. On the monthly REBUILD `candidates` are the fresh state's questions: each is either in the
  * network already (skip it) or a `new_question` decision. Pure.
  */
-export function updatePrompt(asOf, prevAsOf, list, articles, candidates = [], header = null) {
+export function updatePrompt(asOf, prevAsOf, list, articles, candidates = [], header = null, { names = new Map(), routed = [] } = {}) {
+    // Each option with what it ASSUMES (its largest industry effects): the resolution check reads them.
     const lines = list.map(({ n, node }) => {
         const due = node.resolve_by && node.resolve_by <= asOf ? ' DUE' : ''
-        const opts = node.options.map(o => `${o.key} = ${o.label} ${Math.round(o.p * 100)}%${o.dormant ? ` (dormant; signpost: ${o.signpost})` : ''}`).join('; ')
-        return `${n}. [${node.tree}] ${node.question} (resolve by ${node.resolve_by ?? 'n/a'})${due}\n   ${opts}`
+        const opts = node.options.map(o => `   ${o.key} = ${o.label} ${Math.round(o.p * 100)}%${o.dormant ? ` (dormant; signpost: ${o.signpost})` : ''}; assumes: ${effectLine(o, names)}`).join('\n')
+        return `${n}. [${node.tree}] ${node.question} (resolve by ${node.resolve_by ?? 'n/a'})${due}\n${opts}`
     })
+    const route = routed.length ? ['', `ROUTED FROM THE MACRO CALL (${routed.length}): stories it found hitting this sector but no macro question. Decide each like any news.`,
+        ...routed.map(r => `- ${r.text}${r.articles.length ? ` (articles ${r.articles.join(', ')})` : ''}`)] : []
     const cand = candidates.length ? ['', `CANDIDATE QUESTIONS from this month's fresh state (${candidates.length}): for each, it is already in the network (skip it) or it is a new_question decision.`,
         ...candidates.map((q, i) => `C${i + 1}. [${q.tree}] ${q.question} — options: ${q.options.map(o => o.label).join(' / ')}; impact ${q.impact}, uncertainty ${q.uncertainty}`)] : []
     return [...(header ? [header, ''] : []), `AS-OF DATE: ${asOf}. The last update was ${prevAsOf}.`, '', `THE NETWORK (${list.length} live questions):`, ...lines, ...cand, '',
-        `THE NEW ARTICLES (${articles.length}):`, articleLines(articles), '', 'Decide every piece of news that matters; then the signposts; then the due questions.'].join('\n')
+        `THE NEW ARTICLES (${articles.length}):`, articleLines(articles), ...route, '', 'Decide every piece of news that matters; then the signposts; then the due questions.'].join('\n')
 }
 
 const addDays = (iso, n) => new Date(Date.parse(`${iso}T00:00:00Z`) + n * 864e5).toISOString().slice(0, 10)
@@ -143,13 +153,8 @@ export function refreshSections(prev = {}, data = {}) {
     return out
 }
 
-/** A probabilities list over a node's option keys → numbers summing to 1, or null if it does not fit. Pure. */
-export function fitProbabilities(keys, list) {
-    const m = new Map((list ?? []).map(x => [x.option, Math.max(0, Number(x.value) || 0)]))
-    const xs = keys.map(k => m.get(k) ?? 0)
-    const s = xs.reduce((a, b) => a + b, 0)
-    return s > 0 ? xs.map(x => x / s) : null
-}
+// fitProbabilities lives in model.js since the outcomes review shares it; re-exported for its callers.
+export { fitProbabilities }
 
 // The cap is held PER LAYER since the sector layer: layers.holdCaps / capOut.
 
@@ -184,7 +189,26 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
     const at = (k) => list.find(x => x.n === k)?.node.node_id ?? null
     const get = (id) => cur.find(n => n.node_id === id)
     const set = (id, f) => { cur = cur.map(n => (n.node_id === id ? f(n) : n)) }
-    const decisions = [], woken = [], resolved = [], created = [], outside = [], needMap = new Set(), rejudged = new Set()
+    const decisions = [], woken = [], resolved = [], created = [], outside = [], newOptions = [], needMap = new Set(), rejudged = new Set()
+    // THE RESOLUTION CHECK (situation-network-outcomes.md §3): an outcome that does not match what its option ASSUMED (the
+    // old CEO back on "names a permanent CEO: Yes") is added as its own option and resolved to, so the industries get the
+    // push of what happened; when the question is full it resolves to the named option. Either way it is UNFORESEEN:
+    // flagged on the resolution and counted by the scorecard. → whether it resolved.
+    const resolveChecked = (id, r, fallback) => {
+        let option = r.option
+        const unforeseen = r.fits === false
+        const u = r.unforeseen
+        const key = unforeseen && u ? (KEY.test(u.key) ? u.key : snake(u.key || u.label)) : null
+        if (key && !get(id).options.some(o => o.key === key) && get(id).options.length < MAX_OPTIONS) {
+            set(id, x => ({ ...x, options: [...x.options, { key, label: String(u.label).slice(0, 160), p: 0, signpost: signpostOr(u.signpost), effects: [] }] }))
+            option = key; needMap.add(id)
+        } else if (key && get(id).options.some(o => o.key === key)) option = key
+        if (!get(id).options.some(o => o.key === option)) return false
+        const evidence = evidenceOr(r.evidence, fallback)
+        cur = resolve(cur, id, option, { evidence, on: asOf, by: 'llm', unforeseen })
+        resolved.push({ node_id: id, option, evidence, unforeseen })
+        return true
+    }
     for (const e of data?.events ?? []) {
         const id = e.node != null ? at(e.node) : null
         const log = { layer, decision: e.decision, node_id: id, summary: String(e.summary ?? '').slice(0, 300), reasoning: String(e.reasoning ?? '').slice(0, 1200), articles: e.articles ?? [], applied: false }
@@ -196,20 +220,15 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
             if (p) { set(id, x => ({ ...x, options: x.options.map((o, i) => ({ ...o, p: p[i] })) })); rejudged.add(id); log.applied = true }
         } else if (e.decision === 'new_option' && live && e.new_option) {
             const n = get(id), key = KEY.test(e.new_option.key) ? e.new_option.key : snake(e.new_option.key || e.new_option.label)
-            if (key && n.options.length < 4 && !n.options.some(o => o.key === key)) {
+            if (key && n.options.length < MAX_OPTIONS && !n.options.some(o => o.key === key)) {
                 const keys = [...n.options.map(o => o.key), key], p = fitProbabilities(keys, e.probabilities)
                 if (p) {
                     set(id, x => ({ ...x, options: [...x.options, { key, label: String(e.new_option.label).slice(0, 160), p: 0, signpost: signpostOr(e.new_option.signpost), effects: [] }].map((o, i) => ({ ...o, p: p[i] })) }))
-                    rejudged.add(id); needMap.add(id); log.applied = true; log.option = key
+                    rejudged.add(id); needMap.add(id); newOptions.push({ node_id: id, option: key }); log.applied = true; log.option = key
                 }
             }
         } else if (e.decision === 'resolves' && live && e.resolution) {
-            const n = get(id)
-            if (n.options.some(o => o.key === e.resolution.option)) {
-                const evidence = evidenceOr(e.resolution.evidence, e.summary)
-                cur = resolve(cur, id, e.resolution.option, { evidence, on: asOf, by: 'llm' })
-                resolved.push({ node_id: id, option: e.resolution.option, evidence }); log.applied = true
-            }
+            if (resolveChecked(id, e.resolution, e.summary)) { log.applied = true; log.unforeseen = e.resolution.fits === false }
         } else if (e.decision === 'new_question' && e.new_question) {
             const q = e.new_question
             const opts = (q.options ?? []).map(o => ({ key: KEY.test(o.key) ? o.key : snake(o.key || o.label), label: o.label, signpost: signpostOr(o.signpost) }))
@@ -225,7 +244,7 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
                 log.applied = true; log.node_id = node.node_id
             } else log.reason = checked.reason
         } else if (e.decision === 'outside' && e.outside?.text && e.outside.industries?.length) {
-            outside.push({ date: asOf, text: e.outside.text, industries: e.outside.industries, source: (e.articles ?? []).join(',') || null }); log.applied = true
+            outside.push({ date: asOf, text: e.outside.text, industries: e.outside.industries, sectors: e.outside.sectors ?? [], articles: e.articles ?? [], source: (e.articles ?? []).join(',') || null }); log.applied = true
         } else if (e.decision === 'none') log.applied = true
         decisions.push(log)
     }
@@ -239,24 +258,50 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
     for (const d of data?.due ?? []) {
         const id = at(d.node), n = id && get(id)
         if (!n || n.status !== 'live') continue
-        if (d.resolved && n.options.some(o => o.key === d.option)) {
-            const evidence = evidenceOr(d.evidence, 'its resolve-by date passed')
-            cur = resolve(cur, id, d.option, { evidence, on: asOf, by: 'llm' })
-            resolved.push({ node_id: id, option: d.option, evidence })
-        } else {
+        if (d.resolved && resolveChecked(id, d, 'its resolve-by date passed')) continue
+        else {
             const next = realDate(d.new_resolve_by) && d.new_resolve_by > asOf ? d.new_resolve_by : addDays(asOf, 14)
             set(id, x => ({ ...x, resolve_by: next }))
         }
     }
     // Every node whose numbers were SET this update gets its kind, dormant flags and a fresh anchor; the rest keep theirs
     // and move only through their links.
-    cur = cur.map(n => {
-        if (!rejudged.has(n.node_id) || n.status !== 'live') return n
-        const top = n.options.reduce((a, b) => (b.p > a.p ? b : a))
-        const kind = top.p >= SETTLED_AT ? 'settled' : 'open'
-        return { ...n, kind, options: n.options.map(o => ({ ...o, dormant: kind === 'settled' && o.key !== top.key })) }
-    })
-    return { nodes: cur, decisions, woken, resolved, created, outside, needMap, rejudged }
+    cur = cur.map(n => (rejudged.has(n.node_id) ? withKind(n) : n))
+    return { nodes: cur, decisions, woken, resolved, created, outside, newOptions, needMap, rejudged }
+}
+
+/**
+ * The macro call's `outside` stories that name sectors → `Map(sector code → [{ text, articles: [article] }])`, only for
+ * the `codes` the network has. Pure.
+ */
+export function routeOutside(macroResult, codes = []) {
+    const out = new Map()
+    const arts = macroResult?.news?.articles ?? []
+    for (const e of macroResult?.data?.events ?? []) {
+        if (e.decision !== 'outside' || !e.outside?.text) continue
+        const cited = (e.articles ?? []).map(k => arts[k - 1]).filter(Boolean)
+        for (const code of new Set(e.outside.sectors ?? [])) {
+            if (!codes.includes(code)) continue
+            if (!out.has(code)) out.set(code, [])
+            out.get(code).push({ text: String(e.outside.text).slice(0, 400), articles: cited })
+        }
+    }
+    return out
+}
+
+/**
+ * A sector's articles with the routed stories' articles added (once each, by url or title) → `{ articles, routed }`,
+ * `routed` naming each story's articles by their number in the merged list. Pure.
+ */
+export function withRouted(articles, routed = []) {
+    const key = (a) => (a.url ? `u|${a.url}` : `t|${String(a.title).toLowerCase()}`)
+    const all = [...articles]
+    const at = new Map(all.map((a, i) => [key(a), i + 1]))
+    const out = routed.map(r => ({ text: r.text, articles: r.articles.map(a => {
+        if (!at.has(key(a))) { all.push(a); at.set(key(a), all.length) }
+        return at.get(key(a))
+    }) }))
+    return { articles: all, routed: out }
 }
 
 /** Run the update calls this many at a time (the macro one and one per sector). */
@@ -292,42 +337,74 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         for (const x of sectors) jobs.push({ layer: x.code, sector: x, header: sectorHeader(x), candidates: freshSS.get(x.code)?.questions ?? [] })
         // An event naming only a sector the network does not have still updates something: the macro layer.
         if (!jobs.length) jobs.push({ layer: MACRO, header: null, candidates: [] })
+        const indNames = new Map((prev.industries ?? []).map(r => [r.code, r.name]))
         const run = async (job) => {
-            const news = job.layer === MACRO
+            // A sector called only for what the macro call routed to it reads no feed of its own (GNews' quota).
+            let news = job.routedOnly ? { articles: [], gaps: [] } : job.layer === MACRO
                 ? (fresh?.state ? { articles: fresh.state.articles ?? [], gaps: fresh.gaps ?? [] } : await _io.news(days, asOf))
                 : (freshSS.has(job.layer) ? { articles: freshSS.get(job.layer).state.articles ?? [], gaps: [] } : await _io.sectorNews(job.sector, days, asOf, names.get(job.layer) ?? []))
+            const { articles, routed } = withRouted(news.articles ?? [], job.routed ?? [])
+            news = { ...news, articles }
             const mine = prev.nodes.filter(n => layerOf(n) === job.layer)
             const list = numbered(mine)
             // A sector with no live question and no news has nothing to decide.
             if (job.layer !== MACRO && !news.articles?.length && !job.candidates.length) return { ...job, news, list, data: null, skipped: true }
             try {
-                const res = await _io.call({ model: UPDATE_MODEL, effort: UPDATE_EFFORT, systemPrompt: _io.system(), user: updatePrompt(asOf, head.as_of, list, news.articles ?? [], job.candidates, job.header), schema: updateSchema(), onUsage })
+                const res = await _io.call({ model: UPDATE_MODEL, effort: UPDATE_EFFORT, systemPrompt: _io.system(), user: updatePrompt(asOf, head.as_of, list, news.articles, job.candidates, job.header, { names: indNames, routed }), schema: updateSchema(), onUsage })
                 return { ...job, news, list, data: res?.data ?? null, stop: res?.stopReason ?? null }
             } catch (err) {
                 return { ...job, news, list, data: null, error: err.message }
             }
         }
+        // The macro call FIRST: the stories it finds hitting a sector but no macro question are ROUTED to that sector's call
+        // (a sector the network has, even one this event did not name), with their articles.
         const results = []
-        for (let i = 0; i < jobs.length; i += CALL_CONCURRENCY) results.push(...await Promise.all(jobs.slice(i, i + CALL_CONCURRENCY).map(run)))
+        const macroJob = jobs.find(j => j.layer === MACRO)
+        if (macroJob) results.push(await run(macroJob))
+        const routes = routeOutside(results[0], _io.sectorsOn() ? SECTORS.filter(x => prevSS.has(x.code) || freshSS.has(x.code)).map(x => x.code) : [])
+        const sectorJobs = jobs.filter(j => j.layer !== MACRO)
+        for (const [code, items] of routes) {
+            const j = sectorJobs.find(x => x.layer === code)
+            if (j) j.routed = items
+            else if (_io.sectorsOn()) { const x = SECTORS.find(s => s.code === code); sectorJobs.push({ layer: code, sector: x, header: sectorHeader(x), candidates: [], routed: items, routedOnly: true }) }
+        }
+        for (let i = 0; i < sectorJobs.length; i += CALL_CONCURRENCY) results.push(...await Promise.all(sectorJobs.slice(i, i + CALL_CONCURRENCY).map(run)))
         const macroRes = results.find(r => r.layer === MACRO)
         if (macroRes && !macroRes.data) return { ok: false, reason: `the update call returned no answer (${macroRes.error ?? macroRes.stop ?? 'unknown'})`, cost_usd: cost }
         if (!results.some(r => r.data)) return { ok: false, reason: 'no update call answered', cost_usd: cost }
         const layerGaps = results.filter(r => !r.data && !r.skipped).map(r => `${layerName(r.layer)}: the update call failed (${r.error ?? r.stop ?? 'no answer'}) — its questions carry over unchanged`)
         // Each layer's answer applied in turn; each call saw only its own layer's questions.
         let nodes = prev.nodes
-        const applied = { decisions: [], woken: [], resolved: [], created: [], outside: [], needMap: new Set(), rejudged: new Set() }
+        const applied = { decisions: [], woken: [], resolved: [], created: [], outside: [], newOptions: [], needMap: new Set(), rejudged: new Set() }
         for (const r of results) {
             if (!r.data) continue
             const a = applyAnswer(r.data, r.list, nodes, asOf, r.layer)
             nodes = a.nodes
             applied.decisions.push(...a.decisions); applied.woken.push(...a.woken); applied.resolved.push(...a.resolved)
-            applied.created.push(...a.created); applied.outside.push(...a.outside)
+            applied.created.push(...a.created); applied.outside.push(...a.outside); applied.newOptions.push(...a.newOptions)
             for (const id of a.needMap) applied.needMap.add(id)
             for (const id of a.rejudged) applied.rejudged.add(id)
         }
+        // A macro story routed to a sector is the sector's now: the outside list keeps it, saying where it went.
+        for (const o of applied.outside) o.routed_to = (o.sectors ?? []).filter(c => routes.has(c))
+        // THE MISSING-OUTCOMES REVIEW (outcomes.js) on every weekly update and rebuild, over every live question after this
+        // week's news: a missing or lumped outcome becomes an option (or the question is reworded). Failed → a named gap.
+        let outcomes = { added: [], reworded: [], dropped: [], skipped: [], ran: false }
+        const outcomeGaps = []
+        if (kind === 'weekly' || kind === 'rebuild') {
+            const rv = await _io.outcomes(nodes, asOf, indNames)
+            cost += rv.cost_usd ?? 0
+            if (rv.ok) {
+                const a = applyOutcomes(rv.data, rv.list, nodes, asOf)
+                nodes = a.nodes
+                applied.created.push(...a.created); applied.newOptions.push(...a.newOptions)
+                for (const id of a.needMap) applied.needMap.add(id)
+                for (const id of a.rejudged) applied.rejudged.add(id)
+                outcomes = { added: a.added, reworded: a.reworded, dropped: a.dropped, skipped: a.skipped, ran: true }
+            } else outcomeGaps.push(`the missing-outcomes review did not run (${rv.reason})`)
+        }
         // The new branches mapped to industries (only them), one mapping per layer group. The industries keep their NAMES:
         // exposures are keyed by basket (`level:code`), as build.js keys them.
-        const indNames = new Map((prev.industries ?? []).map(r => [r.code, r.name]))
         const basketNames = new Map((prev.industries ?? []).map(r => [`${r.level}:${r.code}`, r.name]))
         let exp = null
         if (applied.needMap.size) {
@@ -348,8 +425,11 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         let links = (prev.links ?? []).filter(l => keptIds.has(l.from.node_id) && keptIds.has(l.to.node_id))
         const created = applied.created.filter(id => nodes.some(n => n.node_id === id && n.status === 'live'))
         let linksAdded = 0
-        if (created.length) {
-            const nl = await _io.links(nodes, created)
+        // A new OPTION on an old question gets its own links too: it shapes the network from the day it exists.
+        const liveIds = new Set(nodes.filter(n => n.status === 'live').map(n => n.node_id))
+        const newOptions = applied.newOptions.filter(x => liveIds.has(x.node_id) && !created.includes(x.node_id))
+        if (created.length || newOptions.length) {
+            const nl = await _io.links(nodes, created, newOptions)
             cost += nl.cost_usd ?? 0
             linksAdded = nl.links?.length ?? 0
             links = [...links, ...(nl.links ?? [])]
@@ -370,8 +450,11 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         })
         const industries = scored.map(r => ({ ...r, early_warning: early.filter(w => w.effects.some(e => e.code === r.code)).map(w => ({ node_id: w.node_id, option: w.option, direction: w.effects.find(e => e.code === r.code).direction })) }))
         const entries = wouldBeEntries(prev.industries ?? [], industries, asOf)
-        const review = reviewItems(prev.nodes, nodes, applied)
+        const rewordedIds = new Set(outcomes.reworded.map(r => r.node_id))
+        const review = reviewItems(prev.nodes, nodes, { ...applied, created: applied.created.filter(id => !rewordedIds.has(id)) })
         for (const p of pr.promoted) review.push({ node_id: p.node_id, why: 'promoted', from: p.from })
+        for (const a of outcomes.added) if (liveIds.has(a.node_id)) review.push({ node_id: a.node_id, option: a.option, why: 'outcome_added' })
+        for (const r of outcomes.reworded) if (liveIds.has(r.node_id)) review.push({ node_id: r.node_id, why: 'reworded', from: r.from })
         // Forecasts: every number SET this update is logged, with its layer; resolutions grade every logged forecast of their node.
         const forecasts = nodes.filter(n => applied.rejudged.has(n.node_id) && n.status === 'live').flatMap(n => n.options.map(o => ({ node_id: n.node_id, option: o.key, p: o.p, set_by: 'llm', resolve_by: n.resolve_by, layer: originOf(n) })))
         const liveNow = nodes.filter(n => n.status === 'live')
@@ -380,7 +463,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
             considered: 0,   // set below, once the parts are counted
             open: liveNow.filter(n => n.kind === 'open').length, settled: liveNow.filter(n => n.kind === 'settled').length,
             resolved: nodes.filter(n => n.status === 'resolved').length,
-            dropped: [...prevDropped, ...capDrops.map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer (${layerName(layerOf(n))}) on ${asOf}`, flagged: true, layer: layerOf(n) }))],
+            dropped: [...prevDropped, ...outcomes.dropped, ...capDrops.map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer (${layerName(layerOf(n))}) on ${asOf}`, flagged: true, layer: layerOf(n) }))],
         }
         dropped.considered = dropped.open + dropped.settled + dropped.resolved + dropped.dropped.length
         // Silence = accept (§11.1): what the card shows becomes Roy's new baseline for the drift rule.
@@ -438,8 +521,9 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         const stats = {
             cost_usd: cost, decisions: applied.decisions, woken: early, resolved: applied.resolved, created: applied.created,
             changes: spread.changes, rounds: spread.rounds, settled: spread.settled, review, entries,
-            gaps: [...results.flatMap(r => r.news?.gaps ?? []), ...layerGaps, ...dataGaps],
-            links_added: linksAdded, promoted: pr.promoted,
+            gaps: [...results.flatMap(r => r.news?.gaps ?? []), ...layerGaps, ...outcomeGaps, ...dataGaps],
+            links_added: linksAdded, promoted: pr.promoted, outcomes,
+            unforeseen: applied.resolved.filter(r => r.unforeseen).map(r => r.node_id),
             layers: results.map(r => ({ layer: r.layer, articles: r.news?.articles?.length ?? 0, decisions: (r.data?.events ?? []).length, ran: Boolean(r.data), skipped: Boolean(r.skipped) })),
             sectors: prev.run?.stats?.sectors ? { ...prev.run.stats.sectors, promoted: pr.promoted } : (sector_states.length ? { built: sector_states.map(x => x.sector), failed: [], promoted: pr.promoted } : null),
         }

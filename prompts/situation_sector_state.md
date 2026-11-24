@@ -25,6 +25,8 @@ THE SECTIONS YOU WRITE
 - `questions`: 1 to 6 open questions about what happens NEXT in this sector, answerable later by what happens, with a
   horizon where it helps. Each:
   - 2–4 options that are mutually exclusive and together cover what can reasonably happen (lower_snake keys);
+    split an option when two ways of it happening would move industries differently ("a permanent CEO is named" holds
+    an outsider and the old CEO back: two options). A separate review attacks the options after you;
   - its `tree`: a short lower_snake name for the sector story it belongs to (e.g. `drug_pricing`, `chip_demand`);
   - `impact`: how much its answer would change which industries in this sector win or lose (low / medium / high);
   - `uncertainty`: how open it is (low / medium / high);

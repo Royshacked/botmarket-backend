@@ -89,6 +89,7 @@ export function formatScorecard(s) {
         `Questions resolved: ${n.questions} (needs ${100}). Brier ${n.brier?.toFixed(3) ?? 'n/a'} vs equal odds ${n.equal_odds?.toFixed(3) ?? 'n/a'}.`,
         `Industry long − short at 6 months: ${s.industries.m6.n} dates, mean ${s.industries.m6.mean == null ? 'n/a' : pct(s.industries.m6.mean)}, t ${s.industries.m6.t?.toFixed(1) ?? 'n/a'}. The macro layer alone: ${s.macro_only?.m6?.mean == null ? 'n/a' : pct(s.macro_only.m6.mean)}. The plain question (control): ${s.control.m6.mean == null ? 'n/a' : pct(s.control.m6.mean)}.`,
         s.layers ? `By layer: macro ${s.layers.macro.questions} resolved (Brier ${s.layers.macro.brier?.toFixed(3) ?? 'n/a'}), sectors ${s.layers.sectors.questions} resolved (Brier ${s.layers.sectors.brier?.toFixed(3) ?? 'n/a'}).` : null,
+        s.unforeseen?.of ? `Unforeseen: ${s.unforeseen.questions} of ${s.unforeseen.of} resolved questions were won by an outcome their options did not have when forecast.` : null,
         `Checks: ${Object.entries(s.verdict.checks).map(([k, v]) => `${k.replace(/_/g, ' ')} ${v ? '✓' : '✗'}`).join('; ')}. ${s.verdict.pass ? 'PASSED.' : 'Not passed.'}`,
     ].filter(Boolean).join('\n')
 }

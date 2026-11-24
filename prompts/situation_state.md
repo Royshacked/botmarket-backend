@@ -33,6 +33,8 @@ THE SECTIONS YOU WRITE
   - a question about what happens NEXT, answerable later by what actually happens, with a horizon in it where it
     helps ("by the end of Q1", "at the next FOMC");
   - 2–4 options that are mutually exclusive and together cover what can reasonably happen (lower_snake keys);
+    split an option when two ways of it happening would move industries differently ("a permanent CEO is named" holds
+    an outsider and the old CEO back: two options). A separate review attacks the options after you;
   - its `tree`: the starting move it belongs to. Use these where they fit, and name a new one only when none does:
     `tariffs_trade`, `inflation_fed_rates`, `ai_buildout`, `geopolitics`, `trust_in_us`, `china_japan`,
     `energy`, `growth_jobs`;
