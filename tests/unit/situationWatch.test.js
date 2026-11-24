@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { dueKind, triagePrompt, tick, mergePending, _setIO, WATCH } from '../../services/situation/watch.js'
+import { dueKind, triagePrompt, tick, mergePending, lookSlot, _setIO, WATCH } from '../../services/situation/watch.js'
 import { cardLines, postReviewCard, overrideNode, _setIO as setReviewIO } from '../../services/situation/review.js'
 import { checkBundle, COLLECTIONS } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
@@ -220,4 +220,12 @@ test('an override waits while an update runs, and refuses if the network moved m
             read: async () => ({ run: { run_id: 'r1' }, nodes, links: [], dropped: { considered: 1, open: 1, settled: 0, dropped: [] }, industries: [] }) })
         assert.match((await overrideNode('a', { a: 1 }, 'roy')).reason, /changed meanwhile/)
     } finally { if (keep === undefined) delete process.env.SITUATION_USERS; else process.env.SITUATION_USERS = keep }
+})
+
+test('lookSlot: fixed 3-hour UTC windows, so two watchers started at different times look in the same batches', () => {
+    const at = (s) => lookSlot(new Date(s))
+    assert.equal(at('2026-11-24T03:00:00Z'), at('2026-11-24T05:59:59Z'))
+    assert.notEqual(at('2026-11-24T05:59:59Z'), at('2026-11-24T06:00:00Z'))
+    // the old rule (3 h after the last look) would wait until 07:10 after a 04:10 look; the slot looks at 06:00
+    assert.notEqual(at('2026-11-24T04:10:00Z'), at('2026-11-24T06:05:00Z'))
 })

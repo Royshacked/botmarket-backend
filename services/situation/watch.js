@@ -99,6 +99,9 @@ export function triageSchema() {
             layers: { type: 'array', items: { type: 'string', enum: [MACRO, ...SECTOR_CODES] } } } }
 }
 
+/** The watch's slot: WATCH_EVERY_MS-wide windows from 00:00 UTC. Pure. */
+export const lookSlot = (d) => Math.floor(d.getTime() / WATCH_EVERY_MS)
+
 /** How many triage verdicts the watch keeps (its log). */
 export const TRIAGES_KEPT = 30
 
@@ -199,7 +202,9 @@ export async function tick() {
         // The material story that had to wait runs as soon as it may.
         if (w.pending && gapOpen && (await spentThisWeek(db, now)) < _io.budget()) return runEvent(w.pending.why, w.pending.layers)
         // The watch.
-        if (w.last_at && now - new Date(w.last_at) < WATCH_EVERY_MS) return { did: 'nothing' }
+        // One look per fixed 3-hour UTC slot (00:00, 03:00, …), not 3 hours after the last look: two networks (prod and
+        // dev, aligned 2026-11-24) then read the news in the same batches whatever time their processes started.
+        if (w.last_at && lookSlot(new Date(w.last_at)) === lookSlot(now)) return { did: 'nothing' }
         const raw = [...(await _io.policy(now).catch(() => [])).map(r => toArticle(r, 'Federal Register')), ...(await _io.fmpNews(now).catch(() => [])).map(r => toArticle(r, 'FMP news'))]
         const sectorRaw = _io.sectorsOn() ? await _io.sectorNews(now).catch(() => []) : []
         const seen = new Set(w.seen ?? [])

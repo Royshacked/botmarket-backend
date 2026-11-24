@@ -115,6 +115,20 @@ Another rule in the same prompt would be a plaster.
 - **What it does not promise.** The event update still decides what the news is: a move, a new question, or outside.
   Nothing forces a question to open.
 
+## 7b. Prod aligned with dev; one schedule (2026-11-24, Roy)
+
+- **Why.** Prod and dev's industry verdicts barely agreed (correlation about 0 over 74 industries; 17 opposite), but the
+  two had been built two hours apart from different fetches, and dev had the Huang reinstatement in. Not a clean test.
+- **The data.** Prod's situation collections were backed up whole to
+  `db-backups/2026-11-24-situation-prod-before-align/`. Dev's weekly run `run_54c4ab11…` (2026-11-24) was copied into
+  prod as its head (`aligned_from: 'axl_dev'`; its `parent_run_id` names a dev run). Prod's older runs stay as history.
+  The watcher's clock and seen list were copied too (prod's own costs kept).
+- **The schedule.** The watch looks once per fixed 3-hour UTC slot (`lookSlot`), not 3 hours after its last look, and
+  the monitor ticks every 10 minutes (was hourly). Both networks then read the news in the same batches, within about
+  10 minutes of each other, and their weeklies fall on the same day.
+- **What still differs.** Each call's own randomness (the triage, the update). That divergence is now the thing to
+  watch: it is the update noise, measured.
+
 ## 8. Also
 
 - The state and sector prompts gained one line: split an option when two ways of it happening would move industries
