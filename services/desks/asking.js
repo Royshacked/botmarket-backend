@@ -200,7 +200,41 @@ export function makeAsking({ sessions = sessionService, profiles = userProfileSe
         return { turnId, agent: ready.agent, build: ready.build.id }
     }
 
-    return { post, setAside, answer }
+    /**
+     * NOT NOW on the open card (Roy, 2026-11-24, on mobile: "no way to get out of the analyst questions window back to
+     * Axl"): the card is marked `dismissed`, the builder's ask is taken off its table — a mid-build card's build with it,
+     * nothing of it run — and the floor goes back to Axl. Nothing is built, nothing is charged.
+     * @returns {Promise<{ agent: string, dismissed: true } | { reason: string }>}
+     */
+    async function dismiss({ user, sessionId, seq }) {
+        return lock(sessionId, async () => {
+            const session = await sessions.get({ sessionId, userId: user._id })
+            if (!session || session.status !== 'active') return { reason: 'not_found' }
+            const card = (await sessions.messagesSince({ sessionId, userId: user._id, afterSeq: Number(seq) - 1, limit: 1 }))?.[0]
+            if (!card || card.seq !== Number(seq) || card.kind !== 'questions') return { reason: 'not_found' }
+            if (card.ref?.state !== 'open') return { reason: 'already_answered' }
+            const agent = card.agent
+            const state = session.agentState?.[agent] ?? null
+            const marked = await sessions.updateRef({ sessionId, userId: user._id, seq: card.seq, ref: { ...card.ref, state: 'dismissed' }, match: { 'ref.state': 'open' } })
+            if (marked.reason) return { reason: 'already_answered' }
+            if (card.ref.mid) {
+                // The build this card paused, if it is still the one waiting on it: off the table, and the queue moves.
+                if (state?.build?.id === card.ref.buildId && state.build.status === 'awaiting') {
+                    const { build: _gone, ...left } = state
+                    await sessions.setAgentState({ sessionId, userId: user._id, agent, state: left })
+                    await builds.startNext({ user, sessionId }).catch(() => {})
+                }
+            } else if (state?.asking?.seq === card.seq) {
+                const { asking: _gone, ...left } = state
+                await sessions.setAgentState({ sessionId, userId: user._id, agent, state: left })
+            }
+            await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
+            logger.info(LOG, 'card dismissed', { sessionId, agent, mid: !!card.ref.mid })
+            return { agent, dismissed: true }
+        })
+    }
+
+    return { post, setAside, answer, dismiss }
 }
 
 export const asking = makeAsking()

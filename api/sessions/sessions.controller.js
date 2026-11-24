@@ -194,8 +194,14 @@ const ANSWER_REASONS = (reason) => {
     return null
 }
 export const answerSessionQuestions = handle('answerSessionQuestions', async (req, res) => {
-    const { seq, answers, accounts, mainAccountId, clientTime } = req.body ?? {}
+    const { seq, answers, accounts, mainAccountId, clientTime, dismiss } = req.body ?? {}
     if (!Number.isInteger(seq)) throw httpError(400, 'seq is required')
+    // "Not now" (Roy, 2026-11-24): the card closed without answering — nothing is built, the chat is back with Axl.
+    if (dismiss === true) {
+        const out = await asking.dismiss({ user: req.user, sessionId: req.params.id, seq })
+        if (out.reason) return sendReason(res, out.reason, { overrides: ANSWER_REASONS, fallback: 404 })
+        return res.json(out)
+    }
     const out = await asking.answer({
         user: req.user, sessionId: req.params.id, seq, answers,
         accounts: parseIdeaAccounts(accounts), mainAccountId: mainAccountId != null ? String(mainAccountId) : null,

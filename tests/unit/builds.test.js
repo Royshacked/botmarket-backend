@@ -329,7 +329,7 @@ test('a review opened from its card runs in the background: begin starts it, run
     assert.deepEqual([turns[0].agent, turns[0].origin, turns[0].input.answered], ['portfolio', 'opening', true])
 })
 
-test("Analyst mode (M17): the user's first message starts a coverage build — this turn is its first, its reply the pane's, the chat back with Axl", async () => {
+test("Analyst mode (M17): the user typing over the analyst's open card starts a coverage build — this turn is its first, its reply the pane's, the chat back with Axl", async () => {
     const { db, sessions, builds } = rig()
     const contexts = makeAgentContextService({ getDb: async () => db })
     const analyst = { agent: 'analyst', run: async () => ({ reply: 'Researching MSFT.' }), done: (r) => ({ reply: r.reply }), nextState: (p) => ({ ...(p ?? {}), draft: { symbol: 'MSFT' }, standing: true }) }
@@ -337,6 +337,7 @@ test("Analyst mode (M17): the user's first message starts a coverage build — t
     const turn = makeSessionTurn({ sessions, contexts, desks: { analyst }, experience: async () => 'novice', profiles: { read: async () => ({ notes: [], size: null }) }, summarize: async () => 'S', asks: noCards, buildsSvc: builds })
     const s = await sessions.getActive({ userId: 'u1' })
     await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst', state: { asking: { seq: 1 } } })
     await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'Research MSFT into coverage', origin: 'user' })
     const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(ses.floor, 'axl')
@@ -446,6 +447,7 @@ test("a build never hands the user to another desk — a route out of one is dro
     const turn = makeSessionTurn({ sessions, contexts, desks: { analyst }, experience: async () => 'novice', profiles: { read: async () => ({ notes: [], size: null }) }, summarize: async () => 'S', asks: noCards, buildsSvc: builds })
     const s = await sessions.getActive({ userId: 'u1' })
     await sessions.setFloor({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst' })
+    await sessions.setAgentState({ sessionId: s.sessionId, userId: 'u1', agent: 'analyst', state: { asking: { seq: 1 } } })
     const out = await turn({ user, sessionId: s.sessionId, agent: 'analyst', text: 'Build tsla', origin: 'user' })
     const ses = await sessions.get({ sessionId: s.sessionId, userId: 'u1' })
     assert.equal(ses.floor, 'axl', 'the chat back with Axl, not the trader')

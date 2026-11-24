@@ -143,6 +143,23 @@ chat or the user's choices."
   floor goes back to Axl. A name not covered → a new coverage build in the background (`<SYM> coverage`); covered +
   Update it → its REVISION build (the item's own edit, without the reopened line); Leave it as is → nothing runs.
 - Typing instead of answering still sets the card aside and starts the build in words (sessionTurn's analyst mode).
+  ONLY then (2026-11-24): a question typed to the analyst with no card open is a chat turn, never a build. Prod: Axl
+  sent "which semiconductor names may be worth researching?" to the analyst, and "Why not nvidia" started an NVDA
+  coverage build. Axl's prompt now keeps "which names in X?" as his own view question; the research route needs ONE company.
+
+### 4.2c Not now, and a no on a build's card (Roy, 2026-11-24, on mobile)
+
+- **Not now** (× in the card's head, "Not now" beside Send): `POST /sessions/:id/answers {seq, dismiss: true}` →
+  `asking.dismiss`. The card is marked `dismissed` (not drawn), the up-front ask comes off the builder's table, a
+  mid-build card's build is dropped (the queue moves), and the floor goes back to Axl. Nothing runs.
+- **A no typed on a build's card** ("I don't want to update Nvidia") used to be told "carry on building with that …
+  then go". `builds.answerNote` now lets the builder stop with "PASS — / No trade: the user does not want this built",
+  and `settle` takes that build off the table (`USER_DECLINED`), with no Change/Dismiss bar.
+- **The root: a parked card turned a route into a chat.** Switching modes away leaves a builder's card open on its
+  table (`asking`). A research route's opening then skipped the card, set the old one aside and ran as a CHAT turn with
+  the analyst, which §2 does not allow (a question is Axl's subagent call; research is the card). Now a route's opening
+  to a builder with a parked card sets it aside and posts a fresh card with the route's name (sessionTurn). The user
+  never chats with a builder outside its build.
 
 The builder may ADD questions it needs from data (a `<questions>` block, validated against the schema).
 Analyst: no questions — the symbol comes from the request.

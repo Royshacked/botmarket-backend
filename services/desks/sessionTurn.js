@@ -185,6 +185,13 @@ export function makeSessionTurn({
         // QUESTIONS UP FRONT (modes-and-builders.md step 4): a NEW build asks everything on one card instead of in prose —
         // the builder does not run; the answers run it (asking.answer). A card left open while the user typed is set
         // aside, and the build goes on in words.
+        // A ROUTE's opening to a builder whose card is PARKED (the picker switched away and left it open — modes.js) is a
+        // new ask: the old card is set aside and a fresh one, with the route's name, is posted. Prod, 2026-11-24: the parked
+        // analyst card made the research route's opening a plain CHAT with the analyst, and the user then talked with
+        // him — the design has no such chat (modes-and-builders.md §2: a question is Axl's subagent call, research is the card).
+        if (origin === 'opening' && state?.asking && !prepared?.answered && needsQuestions(agent, { ...state, asking: null }, origin, prepared)) {
+            state = await asks.setAside({ user, sessionId, agent, state })
+        }
         if (needsQuestions(agent, state, origin, prepared)) {
             const posted = await asks.post({ user, sessionId, agent, state, input: prepared })
             if (!posted.reason) {
@@ -192,16 +199,19 @@ export function makeSessionTurn({
                 return { payload: { reply: '', questions: true }, reply: null }
             }
         }
-        if (state?.asking && (origin === 'user' || origin === 'opening')) state = await asks.setAside({ user, sessionId, agent, state })
+        const typedOverCard = !!state?.asking && (origin === 'user' || origin === 'opening')
+        if (typedOverCard) state = await asks.setAside({ user, sessionId, agent, state })
         // A BUILD IN THE BACKGROUND (step 5b): its turns keep no floor and their replies are the build's (the pane shows
         // them). The user turning to the builder mid-build takes it over in words — the build waits for them.
         if (state?.build?.status === 'building' && origin === 'user') {
             state = { ...state, build: { ...state.build, status: 'awaiting' } }
             await sessions.setAgentState({ sessionId, userId: user._id, agent, state })
         }
-        // ANALYST MODE (step 9, M17): the user's first message to the analyst, with nothing on his table, starts a coverage
-        // build — no card (the analyst asks nothing); this very turn is its first. Queued behind another build: it waits.
-        if (agent === 'analyst' && origin === 'user' && !state?.build && !state?.draft && !state?.editing) {
+        // ANALYST MODE (step 9, M17; the card since 2026-11-21): the user TYPING in place of the analyst's open card, with
+        // nothing on his table, starts a coverage build in words — this very turn is its first. Queued behind another
+        // build: it waits. Only then: a question to the analyst in a conversation ("Why not nvidia", after he listed
+        // semiconductor names — prod, 2026-11-24) is a chat turn, never a build.
+        if (agent === 'analyst' && origin === 'user' && typedOverCard && !state?.build && !state?.draft && !state?.editing) {
             const started = await buildsSvc.start({ user, sessionId, agent, state, title: 'coverage', text, input: {} })
             await sessions.setFloor({ sessionId, userId: user._id, agent: 'axl' })
             if (!started.run) return { payload: { reply: '', queued: true }, reply: null }

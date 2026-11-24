@@ -89,6 +89,21 @@ export function carryLine(agent = 'mentor') {
         `what their answers do not settle. ${none}]`
 }
 
+/**
+ * The app's note that sends the user's card answer back to the build. The answer may be NO: "I don't want to update
+ * Nvidia" (prod, 2026-11-24) was told "carry on building with that … then go", and the analyst re-modelled NVDA anyway.
+ * A no ends the build in the builder's own "nothing to build" line (declineReason), which the bar offers to Dismiss. Pure.
+ */
+export function answerNote(agent, text) {
+    const stop = agent === 'analyst' ? 'one line that starts with "PASS — the user does not want this built"' : 'one line that starts with "No trade: the user does not want this built"'
+    return `[App note: the user answered your question on the card, in the background build.]\n${text}\n` +
+        `If that answer says they do not want this built (no, leave it, not now, nothing), do not build it: reply with only ${stop}. ` +
+        'Otherwise carry on building with it — call your tools again for any figure you need — then go.'
+}
+
+/** A decline that is the user's own no (answerNote's words), not the builder's verdict. */
+export const USER_DECLINED = /^the user does not want this built/i
+
 /** The builder's verdict that there is nothing to build — a line starting "No trade:". → its reason, or null. Pure. */
 export function noTradeReason(text) {
     const m = String(text ?? '').match(/(?:^|\n)\s*(?:\*\*)?no trade(?:\*\*)?\s*[:—-]\s*(.+)/i)
@@ -235,6 +250,14 @@ export function makeBuilds({ sessions = sessionService, depth = agentDepth, runT
         // was confirmed and armed).
         // The analyst's PASS is its "no trade": it ends the build the first time, with its reason — never carried on.
         const declined = declineReason(last?.content, agent)
+        // The user's own NO on the card (answerNote): nothing to Change or Dismiss — the build is simply off the table.
+        if (declined && USER_DECLINED.test(declined)) {
+            const { build: _gone, ...left } = state
+            await write(user, sessionId, agent, left)
+            await startNext({ user, sessionId })
+            logger.info(LOG, 'build dropped — the user said no', { sessionId, agent, title: b.title })
+            return 'dropped'
+        }
         if (declined) {
             const sym = String(state?.draft?.symbol ?? state?.active_symbol ?? '').toUpperCase()
             const title = agent === 'analyst' && sym && b.title === 'coverage' ? `${sym} coverage` : b.title
@@ -316,8 +339,7 @@ export function makeBuilds({ sessions = sessionService, depth = agentDepth, runT
             return { ok: true }
         }
         await write(user, sessionId, agent, { ...state, build: { ...rest, status: 'building', carries: 0 } })
-        runTurn({ user, sessionId, agent, input: {}, origin: 'opening', turnId: `build_${b.id}_answer_${now()}`,
-            text: `[App note: the user answered your question on the card, in the background build.]\n${text}\nCarry on building with that — call your tools again for any figure you need — then go.` })
+        runTurn({ user, sessionId, agent, input: {}, origin: 'opening', turnId: `build_${b.id}_answer_${now()}`, text: answerNote(agent, text) })
             .catch(err => logger.warn(LOG, 'resume failed to start', err.message))
         logger.info(LOG, 'build resumed', { sessionId, agent, title: b.title })
         return { ok: true }
