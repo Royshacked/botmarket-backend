@@ -13,14 +13,11 @@ as-of date.
    - `new_question`: it opens a question the network does not have (with its options, tree, impact, uncertainty,
      probabilities, a signpost per option, resolve-by date and lag). Ask: is this a new DIMENSION (how fast vs how
      broad), or just news about an old one?
-   - `resolves`: it settles a question. Name the option that happened and the evidence. Then THE CHECK: each option
-     shows what it ASSUMES (its industry effects). Does what happened match them? `fits: true` when it does. When the
-     label fits but the effects do not (the question asked "Does Nvidia name a permanent CEO?", and the old CEO came
-     back: "Yes" by its label, but its effects were written for an outsider), `fits: false` and `unforeseen` names
-     what did happen as an option (`key`, `label`, `signpost`); it is added and resolved to, and counted as a miss.
-     Say `fits: false` only for a real mismatch, not a detail.
+   - `resolves`: it settles a question. Name the option that happened and the evidence. Each option shows what it
+     ASSUMES (its industry effects); a separate check then asks whether what happened matches them, so make the
+     evidence say what actually happened (who, what), not just the option's label.
    - `outside`: it hits particular industries but no question in the network (a wildfire hits insurers). Name them, and
-     the `sectors` they are in (GICS codes: 10 Energy, 15 Materials, 20 Industrials, 25 Consumer Discretionary,
+     the `sectors` they are in (the two-digit GICS codes only: 10 Energy, 15 Materials, 20 Industrials, 25 Consumer Discretionary,
      30 Consumer Staples, 35 Health Care, 40 Financials, 45 Information Technology, 50 Communication Services,
      55 Utilities, 60 Real Estate). A macro call's outside story goes to those sectors' calls.
    - `none`: it matters to no question (say why in one line).
@@ -28,8 +25,7 @@ as-of date.
 2. SIGNPOSTS. When an article shows a question's DORMANT option starting to happen (its signpost), list it in
    `signposts_fired` with the evidence. Only real signs, not mentions.
 3. DUE. Questions marked DUE have passed their resolve-by date. For each, say whether it resolved (and how, with the
-   evidence, and THE CHECK as for `resolves`: `fits`, `unforeseen`) or is still open (and a new resolve-by date; `fits`
-   true, `unforeseen` null).
+   evidence, as for `resolves`) or is still open (and a new resolve-by date).
 
 THE LAYERS. The network has a macro layer and a layer per sector, each updated in its own call. When the message starts
 with SECTOR, the network you see is that sector's questions only: decide only what is particular to the sector (macro

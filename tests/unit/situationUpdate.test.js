@@ -7,7 +7,7 @@ import { holdCaps } from '../../services/situation/layers.js'
 import { anchorFor } from '../../services/situation/propagate.js'
 
 // The missing-outcomes review never reaches the model from a test.
-_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }) })
+_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }), check: async (items) => ({ ok: true, checks: items.map(() => ({ fits: true, unforeseen: null })), cost_usd: 0 }) })
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`)
 const node = (node_id, opts, over = {}) => ({

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { dueKind, triagePrompt, tick, _setIO, WATCH } from '../../services/situation/watch.js'
+import { dueKind, triagePrompt, tick, mergePending, _setIO, WATCH } from '../../services/situation/watch.js'
 import { cardLines, postReviewCard, overrideNode, _setIO as setReviewIO } from '../../services/situation/review.js'
 import { checkBundle, COLLECTIONS } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
@@ -73,6 +73,55 @@ test('tick: the watch — new articles to triage; material news is one event upd
         assert.equal(updates, 1)
         assert.equal(triaged, 2)
     } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
+})
+
+test('tick: material news that must wait is KEPT and runs once the day has passed; every verdict is logged; a weekly clears it', async () => {
+    // Prod, 2026-11-23: Huang's reinstatement reached the triage after the day's event update; it was marked seen and lost.
+    const keep = process.env.SITUATION_NETWORK
+    try {
+        process.env.SITUATION_NETWORK = 'true'
+        const db = fakeDb([{ kind: 'build', as_of: '2025-01-05', complete: true }])
+        const events = []
+        let verdict = { material: true, why: 'tariffs signed', articles: [1], layers: ['macro'] }
+        _setIO({
+            sectorsOn: () => false, now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
+            read: async () => ({ nodes: [node('a', { a: 0.5, b: 0.5 })] }),
+            policy: async () => [], fmpNews: async () => [{ title: 'Big tariff news', date: '2025-01-07', url: 'https://n/1' }],
+            payer: async () => null, call: async () => ({ data: verdict }),
+            update: async (o) => { events.push(o); return { ok: true, run_id: `r${events.length + 1}` } }, card: async () => {}, budget: () => 10,
+        })
+        assert.equal((await tick()).did, 'event')
+        verdict = { material: true, why: 'CEO reinstated', articles: [1], layers: ['45'] }
+        _setIO({ now: () => new Date('2025-01-07T16:00:00Z'), fmpNews: async () => [{ title: 'Huang back', date: '2025-01-07', url: 'https://n/2' }] })
+        const waited = await tick()
+        assert.deepEqual([waited.waiting, waited.pending], ['one event update a day', true])
+        verdict = { material: true, why: 'board reshuffle', articles: [1], layers: ['macro'] }
+        _setIO({ now: () => new Date('2025-01-07T20:00:00Z'), fmpNews: async () => [{ title: 'Board news', date: '2025-01-07', url: 'https://n/3' }] })
+        await tick()
+        const w = () => db.store[WATCH][0]
+        assert.deepEqual(w().pending, { since: '2025-01-07T16:00:00.000Z', why: 'CEO reinstated · board reshuffle', layers: ['45', 'macro'] })
+        assert.deepEqual(w().triages.map(t => [t.material, t.why]), [[true, 'tariffs signed'], [true, 'CEO reinstated'], [true, 'board reshuffle']])
+        // Still inside the day: it waits. Past it: the pending story runs, without waiting for the next look.
+        _setIO({ now: () => new Date('2025-01-08T11:00:00Z') })
+        assert.deepEqual(await tick(), { did: 'watch', articles: 0 }, 'a look, nothing new; the pending story still waits its day')
+        _setIO({ now: () => new Date('2025-01-08T12:30:00Z') })
+        const ran = await tick()
+        assert.deepEqual([ran.did, ran.trigger, ran.layers], ['event', 'CEO reinstated · board reshuffle', ['45', 'macro']])
+        assert.equal(w().pending, null)
+        assert.equal(events.length, 2)
+        // A weekly reads the whole week: it clears whatever waits.
+        await db.collection(WATCH).updateOne({ _id: 'watch' }, { $set: { pending: { since: 'x', why: 'y', layers: ['macro'] } } })
+        _setIO({ now: () => new Date('2025-01-12T12:00:00Z'), control: async () => {} })
+        assert.equal((await tick()).did, 'weekly')
+        assert.equal(w().pending, null)
+    } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
+})
+
+test('mergePending: the earliest since, reasons joined once, layers united', () => {
+    const a = mergePending(null, { since: 't1', why: 'x', layers: ['45'] })
+    assert.deepEqual(a, { since: 't1', why: 'x', layers: ['45'] })
+    assert.deepEqual(mergePending(a, { since: 't2', why: 'x', layers: [] }), { since: 't1', why: 'x', layers: ['45'] })
+    assert.equal(mergePending(a, { since: 't2', why: 'y'.repeat(700), layers: ['bogus'] }).why.length, 600)
 })
 
 // ── the review ──

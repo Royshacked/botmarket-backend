@@ -16,7 +16,9 @@ You are given the state (dated, sourced) and the questions, numbered. For EVERY 
    statement, a price, a filing). These wake the less likely branches later, so make them checkable.
 7. `given`: when a question only makes sense if another question goes a particular way, name that branch
    `{ question, option }` (its number and option key) — this question's probabilities are then CONDITIONAL on it.
-   Otherwise null. Do not invent chains: most questions stand alone.
+   Otherwise null. Use it for a FOLLOW-UP: a question that only matters once an option happens and that decides which
+   way industries move then ("Who becomes CEO?" under "names a permanent CEO: Yes"). No chains just for structure:
+   a question that stands alone stays alone, and a follow-up goes two levels at most.
 8. `duplicate_of`: the number of an earlier question that asks the same thing, or null.
 
 Then the LINKS: where one question's option, if it happens, makes an option of ANOTHER question more or less likely.

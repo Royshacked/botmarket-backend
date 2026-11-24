@@ -99,6 +99,27 @@ export function resolve(nodes, id, option, { evidence = '', on = null, by = 'llm
     }))
 }
 
+/**
+ * FOLLOW-UPS LEFT HANGING (situation-network-outcomes.md §7): a live node whose parent resolved to ANOTHER option, or left
+ * the network, can never happen; it is dropped (and so never graded), and so is anything under it. A parent resolved to
+ * ITS option leaves it standing (its reach is 1). → `{ nodes, dropped: [{ node, parent }] }`. Pure.
+ */
+export function dropOrphans(nodes) {
+    let cur = nodes
+    const out = []
+    for (let found = true; found;) {
+        const map = byId(cur)
+        const now = cur.filter(n => n.status === 'live' && n.given).map(n => ({ node: n, parent: map.get(n.given.node_id) ?? null }))
+            .filter(({ node: n, parent: p }) => !p || p.status === 'dropped' || (p.status === 'resolved' && p.resolved?.option !== n.given.option))
+        found = now.length > 0
+        if (!found) break
+        out.push(...now)
+        const ids = new Set(now.map(x => x.node.node_id))
+        cur = cur.map(n => (ids.has(n.node_id) ? { ...n, status: 'dropped' } : n))
+    }
+    return { nodes: cur, dropped: out }
+}
+
 /** The anchor for a node whose numbers were just set: its numbers, and each incoming link's source marginal now. Pure. */
 export function anchorFor(nodes, links, id, on = null) {
     const map = byId(nodes)

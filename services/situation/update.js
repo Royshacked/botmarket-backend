@@ -18,7 +18,7 @@ import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
 import { checkNode, newId, BUCKETS, KEY, snake, realDate, fitProbabilities, withKind, MAX_OPTIONS } from './model.js'
-import { propagate, resolve, anchorFor } from './propagate.js'
+import { propagate, resolve, anchorFor, dropOrphans } from './propagate.js'
 import { fetchNews, fetchSectorNews, articleLines } from './news.js'
 import { buildExposures } from './exposure.js'
 import { mapBranches, scoreIndustries, wouldBeEntries } from './industries.js'
@@ -28,7 +28,7 @@ import { capOut, promote, anchorLinks, withMacroScores } from './layers.js'
 import { mapByLayer } from './build.js'
 import { macroBackdrop, sectorPriceItems, rewriteSectorState } from './sectorState.js'
 import { rewriteState } from './state.js'
-import { reviewOutcomes, applyOutcomes, effectLine } from './outcomes.js'
+import { reviewOutcomes, applyOutcomes, effectLine, checkResolutions } from './outcomes.js'
 import { MACRO, SECTORS, SECTOR_CODES, layerOf, originOf, layerName, topNames } from './sectors.js'
 import { config } from '../config.js'
 import { buildDataSections } from './state.data.js'
@@ -56,6 +56,7 @@ const _io = {
     sectorNews: (sector, days, asOf, names) => fetchSectorNews(sector, { days, asOf, names }), names: () => topNames(),
     rewrite: (asOf, o) => rewriteState(asOf, o),
     outcomes: (nodes, asOf, names) => reviewOutcomes(nodes, asOf, names),
+    check: (items, asOf, names) => checkResolutions(items, asOf, names),
     rewriteSector: (sector, asOf, macroState, rows, articles, questions) => rewriteSectorState(sector, asOf, macroState, rows, articles, questions),
     sectorsOn: () => config.situationSectors,
     links: (nodes, ids, options) => linksFor(nodes, ids, options), data: (asOf) => buildDataSections(asOf),
@@ -66,14 +67,16 @@ export function _setIO(io) { Object.assign(_io, io) }
 const pList = { type: 'array', items: { type: 'object', additionalProperties: false, required: ['option', 'value'], properties: { option: { type: 'string' }, value: { type: 'number' } } } }
 const lag = { type: 'object', additionalProperties: false, required: ['min', 'max'], properties: { min: { type: 'integer' }, max: { type: 'integer' } } }
 const nul = (s) => ({ anyOf: [s, { type: 'null' }] })
+/** The sector codes a model named ("45" or "45 Information Technology") → the valid codes. Pure. */
+export const sectorCodes = (xs) => [...new Set((Array.isArray(xs) ? xs : []).map(x => String(x).trim().slice(0, 2)).filter(c => SECTOR_CODES.includes(c)))]
 
 /** The update's schema. Pure. */
 export function updateSchema() {
     const opt = { type: 'object', additionalProperties: false, required: ['key', 'label', 'signpost'], properties: { key: { type: 'string' }, label: { type: 'string' }, signpost: { type: 'string' } } }
-    // THE RESOLUTION CHECK: `fits` — does what happened match what the option ASSUMES (its effects)? Not → `unforeseen`
-    // names the outcome that did happen, as an option.
-    const check = { fits: { type: 'boolean' }, unforeseen: nul(opt) }
-    const resolution = { type: 'object', additionalProperties: false, required: ['option', 'evidence', 'fits', 'unforeseen'], properties: { option: { type: 'string' }, evidence: { type: 'string' }, ...check } }
+    // NO ROOM LEFT: this schema sits at the API's grammar limit ("The compiled grammar is too large", dev run 2026-11-24).
+    // `outside.sectors` fits; the resolution check (`fits` / `unforeseen`) did not, here or as its own top-level array,
+    // so it is a separate call (outcomes.checkResolutions). Adding a field here needs a live probe first.
+    const resolution = { type: 'object', additionalProperties: false, required: ['option', 'evidence'], properties: { option: { type: 'string' }, evidence: { type: 'string' } } }
     return {
         type: 'object', additionalProperties: false, required: ['events', 'signposts_fired', 'due'],
         properties: {
@@ -91,13 +94,13 @@ export function updateSchema() {
                             impact: { type: 'string', enum: ['low', 'medium', 'high'] }, uncertainty: { type: 'string', enum: ['low', 'medium', 'high'] },
                             why: { type: 'string' }, resolve_by: { type: 'string' }, lag_days: lag } }),
                     outside: nul({ type: 'object', additionalProperties: false, required: ['text', 'industries', 'sectors'], properties: { text: { type: 'string' }, industries: { type: 'array', items: { type: 'string' } },
-                        sectors: { type: 'array', items: { type: 'string', enum: [...SECTOR_CODES] } } } }),
+                        sectors: { type: 'array', items: { type: 'string' } } } }),
                 },
             } },
             signposts_fired: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'option', 'evidence', 'articles'],
                 properties: { node: { type: 'integer' }, option: { type: 'string' }, evidence: { type: 'string' }, articles: { type: 'array', items: { type: 'integer' } } } } },
-            due: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'resolved', 'option', 'evidence', 'new_resolve_by', 'fits', 'unforeseen'],
-                properties: { node: { type: 'integer' }, resolved: { type: 'boolean' }, option: { type: ['string', 'null'] }, evidence: { type: 'string' }, new_resolve_by: { type: ['string', 'null'] }, ...check } } },
+            due: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['node', 'resolved', 'option', 'evidence', 'new_resolve_by'],
+                properties: { node: { type: 'integer' }, resolved: { type: 'boolean' }, option: { type: ['string', 'null'] }, evidence: { type: 'string' }, new_resolve_by: { type: ['string', 'null'] } } } },
         },
     }
 }
@@ -197,10 +200,10 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
     const resolveChecked = (id, r, fallback) => {
         let option = r.option
         const unforeseen = r.fits === false
-        const u = r.unforeseen
-        const key = unforeseen && u ? (KEY.test(u.key) ? u.key : snake(u.key || u.label)) : null
+        const u = typeof r.unforeseen === 'string' ? r.unforeseen.trim() : ''
+        const key = unforeseen && u ? snake(u) : null
         if (key && !get(id).options.some(o => o.key === key) && get(id).options.length < MAX_OPTIONS) {
-            set(id, x => ({ ...x, options: [...x.options, { key, label: String(u.label).slice(0, 160), p: 0, signpost: signpostOr(u.signpost), effects: [] }] }))
+            set(id, x => ({ ...x, options: [...x.options, { key, label: u.slice(0, 160), p: 0, signpost: signpostOr(''), effects: [] }] }))
             option = key; needMap.add(id)
         } else if (key && get(id).options.some(o => o.key === key)) option = key
         if (!get(id).options.some(o => o.key === option)) return false
@@ -244,7 +247,7 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
                 log.applied = true; log.node_id = node.node_id
             } else log.reason = checked.reason
         } else if (e.decision === 'outside' && e.outside?.text && e.outside.industries?.length) {
-            outside.push({ date: asOf, text: e.outside.text, industries: e.outside.industries, sectors: e.outside.sectors ?? [], articles: e.articles ?? [], source: (e.articles ?? []).join(',') || null }); log.applied = true
+            outside.push({ date: asOf, text: e.outside.text, industries: e.outside.industries, sectors: sectorCodes(e.outside.sectors), articles: e.articles ?? [], source: (e.articles ?? []).join(',') || null }); log.applied = true
         } else if (e.decision === 'none') log.applied = true
         decisions.push(log)
     }
@@ -271,6 +274,24 @@ export function applyAnswer(data, list, nodes, asOf, layer = MACRO) {
 }
 
 /**
+ * THE RESOLUTION CHECK on one call's answer (situation-network-outcomes.md §3): every resolution it makes (`resolves`, a
+ * DUE question resolved) gets `fits` / `unforeseen` from the check's own call (outcomes.checkResolutions), which
+ * applyAnswer then reads. Failed → each resolves by its label (`fits: true`) and the gap is named. The answer is copied,
+ * never changed. → `{ data, cost_usd, gap }`.
+ */
+export async function withChecks(data, list, asOf, names, check = _io.check) {
+    const out = structuredClone(data)
+    const nodeAt = (k) => list.find(x => x.n === k)?.node ?? null
+    const items = []
+    for (const e of out.events ?? []) if (e.decision === 'resolves' && e.resolution && nodeAt(e.node)) items.push({ ref: e.resolution, node: nodeAt(e.node), option: e.resolution.option, evidence: e.resolution.evidence })
+    for (const d of out.due ?? []) if (d.resolved && d.option && nodeAt(d.node)) items.push({ ref: d, node: nodeAt(d.node), option: d.option, evidence: d.evidence })
+    if (!items.length) return { data: out, cost_usd: 0, gap: null }
+    const rv = await check(items, asOf, names)
+    items.forEach((it, i) => { const c = rv.ok ? rv.checks[i] : null; it.ref.fits = c ? c.fits : true; it.ref.unforeseen = c ? c.unforeseen : null })
+    return { data: out, cost_usd: rv.cost_usd ?? 0, gap: rv.ok ? null : `the resolution check did not run (${rv.reason}); ${items.length} resolution(s) taken by their label` }
+}
+
+/**
  * The macro call's `outside` stories that name sectors → `Map(sector code → [{ text, articles: [article] }])`, only for
  * the `codes` the network has. Pure.
  */
@@ -280,7 +301,7 @@ export function routeOutside(macroResult, codes = []) {
     for (const e of macroResult?.data?.events ?? []) {
         if (e.decision !== 'outside' || !e.outside?.text) continue
         const cited = (e.articles ?? []).map(k => arts[k - 1]).filter(Boolean)
-        for (const code of new Set(e.outside.sectors ?? [])) {
+        for (const code of new Set(sectorCodes(e.outside.sectors))) {
             if (!codes.includes(code)) continue
             if (!out.has(code)) out.set(code, [])
             out.get(code).push({ text: String(e.outside.text).slice(0, 400), articles: cited })
@@ -376,9 +397,13 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         // Each layer's answer applied in turn; each call saw only its own layer's questions.
         let nodes = prev.nodes
         const applied = { decisions: [], woken: [], resolved: [], created: [], outside: [], newOptions: [], needMap: new Set(), rejudged: new Set() }
+        const checkGaps = []
         for (const r of results) {
             if (!r.data) continue
-            const a = applyAnswer(r.data, r.list, nodes, asOf, r.layer)
+            const ck = await withChecks(r.data, r.list, asOf, indNames)
+            cost += ck.cost_usd
+            if (ck.gap) checkGaps.push(`${layerName(r.layer)}: ${ck.gap}`)
+            const a = applyAnswer(ck.data, r.list, nodes, asOf, r.layer)
             nodes = a.nodes
             applied.decisions.push(...a.decisions); applied.woken.push(...a.woken); applied.resolved.push(...a.resolved)
             applied.created.push(...a.created); applied.outside.push(...a.outside); applied.newOptions.push(...a.newOptions)
@@ -389,7 +414,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         for (const o of applied.outside) o.routed_to = (o.sectors ?? []).filter(c => routes.has(c))
         // THE MISSING-OUTCOMES REVIEW (outcomes.js) on every weekly update and rebuild, over every live question after this
         // week's news: a missing or lumped outcome becomes an option (or the question is reworded). Failed → a named gap.
-        let outcomes = { added: [], reworded: [], dropped: [], skipped: [], ran: false }
+        let outcomes = { added: [], reworded: [], followUps: [], dropped: [], skipped: [], ran: false }
         const outcomeGaps = []
         if (kind === 'weekly' || kind === 'rebuild') {
             const rv = await _io.outcomes(nodes, asOf, indNames)
@@ -400,9 +425,14 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
                 applied.created.push(...a.created); applied.newOptions.push(...a.newOptions)
                 for (const id of a.needMap) applied.needMap.add(id)
                 for (const id of a.rejudged) applied.rejudged.add(id)
-                outcomes = { added: a.added, reworded: a.reworded, dropped: a.dropped, skipped: a.skipped, ran: true }
+                outcomes = { added: a.added, reworded: a.reworded, followUps: a.followUps, dropped: a.dropped, skipped: a.skipped, ran: true }
             } else outcomeGaps.push(`the missing-outcomes review did not run (${rv.reason})`)
         }
+        // A follow-up whose parent resolved to another option can never happen: dropped, never graded.
+        const orph = dropOrphans(nodes)
+        nodes = orph.nodes
+        const orphanDrops = orph.dropped.map(({ node: n, parent: p }) => ({ question: n.question, options: n.options.map(o => o.label), reason: 'parent_resolved', flagged: false, layer: layerOf(n),
+            note: p?.status === 'resolved' ? `"${p.question.slice(0, 120)}" resolved to "${p.options.find(o => o.key === p.resolved?.option)?.label ?? p.resolved?.option}" on ${asOf}, not "${p.options.find(o => o.key === n.given.option)?.label ?? n.given.option}"` : `the question it hung under left the network on ${asOf}` }))
         // The new branches mapped to industries (only them), one mapping per layer group. The industries keep their NAMES:
         // exposures are keyed by basket (`level:code`), as build.js keys them.
         const basketNames = new Map((prev.industries ?? []).map(r => [`${r.level}:${r.code}`, r.name]))
@@ -450,11 +480,12 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         })
         const industries = scored.map(r => ({ ...r, early_warning: early.filter(w => w.effects.some(e => e.code === r.code)).map(w => ({ node_id: w.node_id, option: w.option, direction: w.effects.find(e => e.code === r.code).direction })) }))
         const entries = wouldBeEntries(prev.industries ?? [], industries, asOf)
-        const rewordedIds = new Set(outcomes.reworded.map(r => r.node_id))
+        const rewordedIds = new Set([...outcomes.reworded, ...outcomes.followUps].map(r => r.node_id))   // listed as reworded / follow_up, not 'new'
         const review = reviewItems(prev.nodes, nodes, { ...applied, created: applied.created.filter(id => !rewordedIds.has(id)) })
         for (const p of pr.promoted) review.push({ node_id: p.node_id, why: 'promoted', from: p.from })
         for (const a of outcomes.added) if (liveIds.has(a.node_id)) review.push({ node_id: a.node_id, option: a.option, why: 'outcome_added' })
         for (const r of outcomes.reworded) if (liveIds.has(r.node_id)) review.push({ node_id: r.node_id, why: 'reworded', from: r.from })
+        for (const f of outcomes.followUps) if (liveIds.has(f.node_id)) review.push({ node_id: f.node_id, why: 'follow_up', parent: f.parent, option: f.option })
         // Forecasts: every number SET this update is logged, with its layer; resolutions grade every logged forecast of their node.
         const forecasts = nodes.filter(n => applied.rejudged.has(n.node_id) && n.status === 'live').flatMap(n => n.options.map(o => ({ node_id: n.node_id, option: o.key, p: o.p, set_by: 'llm', resolve_by: n.resolve_by, layer: originOf(n) })))
         const liveNow = nodes.filter(n => n.status === 'live')
@@ -463,7 +494,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
             considered: 0,   // set below, once the parts are counted
             open: liveNow.filter(n => n.kind === 'open').length, settled: liveNow.filter(n => n.kind === 'settled').length,
             resolved: nodes.filter(n => n.status === 'resolved').length,
-            dropped: [...prevDropped, ...outcomes.dropped, ...capDrops.map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer (${layerName(layerOf(n))}) on ${asOf}`, flagged: true, layer: layerOf(n) }))],
+            dropped: [...prevDropped, ...outcomes.dropped, ...orphanDrops, ...capDrops.map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer (${layerName(layerOf(n))}) on ${asOf}`, flagged: true, layer: layerOf(n) }))],
         }
         dropped.considered = dropped.open + dropped.settled + dropped.resolved + dropped.dropped.length
         // Silence = accept (§11.1): what the card shows becomes Roy's new baseline for the drift rule.
@@ -521,7 +552,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         const stats = {
             cost_usd: cost, decisions: applied.decisions, woken: early, resolved: applied.resolved, created: applied.created,
             changes: spread.changes, rounds: spread.rounds, settled: spread.settled, review, entries,
-            gaps: [...results.flatMap(r => r.news?.gaps ?? []), ...layerGaps, ...outcomeGaps, ...dataGaps],
+            gaps: [...results.flatMap(r => r.news?.gaps ?? []), ...layerGaps, ...checkGaps, ...outcomeGaps, ...dataGaps],
             links_added: linksAdded, promoted: pr.promoted, outcomes,
             unforeseen: applied.resolved.filter(r => r.unforeseen).map(r => r.node_id),
             layers: results.map(r => ({ layer: r.layer, articles: r.news?.articles?.length ?? 0, decisions: (r.data?.events ?? []).length, ran: Boolean(r.data), skipped: Boolean(r.skipped) })),

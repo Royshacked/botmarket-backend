@@ -19,7 +19,12 @@ For each question that needs it, ONE change:
 - `reword`: the question itself is framed on the wrong thing, or it has 4 options already and still misses an outcome.
   Give the replacing question: its wording, 2–4 options (each with a signpost) that cover what can happen, and their
   probabilities. Ask it about what MOVES INDUSTRIES ("Who leads Nvidia by Q1 2027?"), not about a label that hides it.
-Questions that are fine get no entry. Most questions are fine; a change is a claim you must argue in `reasoning`, with the
+- `follow_up`: an option is likely enough (about 20% or more, or its signpost has fired) and, IF it happens, the next
+  question decides which way industries move. "Does Nvidia name a permanent CEO? Yes" → "Who becomes CEO?": an insider,
+  an outsider, the old CEO back. Give `under_option` (the option's key), the follow-up's question, its 2–4 options (each
+  with a signpost), its probabilities AS IF that option happened, and its resolve-by date. Only when the follow-up's
+  options would move industries differently from each other; not under a question that hangs under another already.
+Questions that are fine get no entry. The lines marked "(follow-up of N, if X)" already hang under an option. Most questions are fine; a change is a claim you must argue in `reasoning`, with the
 outcome named and why its industries move differently. Change at most 8 questions: the most consequential first.
 
 Use only the question list and what you know up to the as-of date. Answer in the JSON schema given.

@@ -9,6 +9,10 @@
 //     GNews, its quota is the weekly build's) goes to ONE cheap triage call against the live questions and their dormant
 //     signposts. Material news → an EVENT update, at most one a day.
 // The weekly LLM budget (SITUATION_WEEKLY_USD) holds the event updates: past it, events wait for the weekly run.
+// MATERIAL NEWS THAT MUST WAIT IS KEPT (2026-11-24): prod's triage saw Huang's reinstatement after the day's one event
+// update was spent; the articles were marked seen and the story was lost. Now the triage's verdict is kept as `pending`
+// and its event update runs on the first tick the gap (or the budget) allows; a scheduled run clears it (it reads the
+// whole week). Every triage verdict is logged (`triages`, the last TRIAGES_KEPT).
 // After every run, Roy's review card (review.js).
 
 import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
@@ -95,6 +99,19 @@ export function triageSchema() {
             layers: { type: 'array', items: { type: 'string', enum: [MACRO, ...SECTOR_CODES] } } } }
 }
 
+/** How many triage verdicts the watch keeps (its log). */
+export const TRIAGES_KEPT = 30
+
+/**
+ * A material story that must wait, merged into what already waits → `{ since, why, layers }`: the earliest `since`, the
+ * reasons joined (newest last, capped), the layers' union. Pure.
+ */
+export function mergePending(old, add) {
+    if (!old) return { since: add.since, why: String(add.why).slice(0, 280), layers: eventLayers(add.layers) }
+    const why = old.why.includes(add.why) ? old.why : `${old.why} · ${add.why}`
+    return { since: old.since, why: why.length > 600 ? `…${why.slice(-599)}` : why, layers: eventLayers([...(old.layers ?? []), ...(add.layers ?? [])]) }
+}
+
 /** The triage's layers → the event update's: known layers only, each once; none named → the macro layer. Pure. */
 export function eventLayers(xs) {
     const out = [...new Set((xs ?? []).filter(x => x === MACRO || SECTOR_CODES.includes(x)))]
@@ -153,7 +170,7 @@ export async function tick() {
             await _io.busy(k)
             let r
             try { r = await job() } finally { await _io.free() }
-            if (r.ok) { await save({ failed: null }); await _io.card(r.run_id); await _io.control(r.run_id) }
+            if (r.ok) { await save({ failed: null, pending: null }); await _io.card(r.run_id); await _io.control(r.run_id) }
             else await save({ failed: { kind: k, at: now.toISOString(), reason: String(r.reason ?? 'failed').slice(0, 300) }, costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: k }]) })
             return { did: k, ...r }
         }
@@ -168,6 +185,19 @@ export async function tick() {
             return _io.update({ kind: 'rebuild', asOf: today, fresh })
         })
         if (kind === 'weekly') return scheduled('weekly', () => _io.update({ kind: 'weekly', asOf: today }))
+        // An event update: the day's one, inside the weekly budget. Spent whether it saved or not (a failure's cost counted);
+        // the pending story goes with it.
+        const gapOpen = !w.last_event_at || now - new Date(w.last_event_at) >= EVENT_MIN_GAP_MS
+        const runEvent = async (trigger, layers) => {
+            await _io.busy('event')
+            let r
+            try { r = await _io.update({ kind: 'event', trigger, asOf: today, layers }) } finally { await _io.free() }
+            await save({ last_event_at: now.toISOString(), pending: null, ...(r.ok ? {} : { costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: 'event' }]) }) })
+            if (r.ok) await _io.card(r.run_id)
+            return { did: 'event', trigger, layers, ...r }
+        }
+        // The material story that had to wait runs as soon as it may.
+        if (w.pending && gapOpen && (await spentThisWeek(db, now)) < _io.budget()) return runEvent(w.pending.why, w.pending.layers)
         // The watch.
         if (w.last_at && now - new Date(w.last_at) < WATCH_EVERY_MS) return { did: 'nothing' }
         const raw = [...(await _io.policy(now).catch(() => [])).map(r => toArticle(r, 'Federal Register')), ...(await _io.fmpNews(now).catch(() => [])).map(r => toArticle(r, 'FMP news'))]
@@ -181,22 +211,24 @@ export async function tick() {
         try { payer = await _io.payer() } catch { /* unbooked */ }
         const res = await _io.call({ model: TRIAGE_MODEL, effort: TRIAGE_EFFORT, systemPrompt: TRIAGE_SYSTEM, user: triagePrompt(numbered(prev.nodes), fresh), schema: triageSchema(),
             onUsage: (usage, m) => { cost += calcCost(m, usage); if (payer) _io.record(payer, m, usage).catch(() => {}) } })
-        await save({ last_at: now.toISOString(), seen: keepSeen, costs: keepCosts([{ at: now.toISOString(), usd: cost }]) })
+        const material = Boolean(res?.data?.material)
+        const why = String(res?.data?.why ?? (res?.data ? '' : 'the triage returned no answer')).slice(0, 280)
+        const layers = material ? eventLayers(res.data.layers) : []
+        const triages = [...(w.triages ?? []), { at: now.toISOString(), articles: fresh.length, material, why, layers }].slice(-TRIAGES_KEPT)
+        await save({ last_at: now.toISOString(), seen: keepSeen, costs: keepCosts([{ at: now.toISOString(), usd: cost }]), triages })
         w.costs = keepCosts([{ at: now.toISOString(), usd: cost }])
-        if (!res?.data?.material) return { did: 'watch', articles: fresh.length, material: false }
+        if (!material) return { did: 'watch', articles: fresh.length, material: false }
         // The layers the news touched: an event update runs only those (the macro layer when the triage named none).
-        const layers = eventLayers(res.data.layers)
-        if (w.last_event_at && now - new Date(w.last_event_at) < EVENT_MIN_GAP_MS) return { did: 'watch', material: true, waiting: 'one event update a day' }
+        const trigger = why || 'material news'
         const spent = await spentThisWeek(db, now)
-        if (spent >= _io.budget()) return { did: 'watch', material: true, waiting: `the weekly budget ($${_io.budget()}) is spent ($${spent.toFixed(2)})` }
-        const trigger = String(res.data.why ?? 'material news').slice(0, 280)
-        await _io.busy('event')
-        let r
-        try { r = await _io.update({ kind: 'event', trigger, asOf: today, layers }) } finally { await _io.free() }
-        // The day's one event update is spent whether it saved or not; a failure's cost is counted.
-        await save({ last_event_at: now.toISOString(), ...(r.ok ? {} : { costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: 'event' }]) }) })
-        if (r.ok) await _io.card(r.run_id)
-        return { did: 'event', trigger, layers, ...r }
+        const wait = !gapOpen ? 'one event update a day' : spent >= _io.budget() ? `the weekly budget ($${_io.budget()}) is spent ($${spent.toFixed(2)})` : null
+        if (wait) {
+            await save({ pending: mergePending(w.pending, { since: now.toISOString(), why: trigger, layers }) })
+            return { did: 'watch', material: true, waiting: wait, pending: true }
+        }
+        // A story already waiting rides along with this one.
+        const p = mergePending(w.pending, { since: now.toISOString(), why: trigger, layers })
+        return runEvent(p.why, p.layers)
     } catch (err) {
         logger.warn(LOG, 'tick failed', { error: err.message })
         return { did: 'error', reason: err.message }

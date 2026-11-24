@@ -44,8 +44,16 @@ Another rule in the same prompt would be a plaster.
 
 ## 3. The resolution check (the safety net)
 
-- **The check.** The update prompt now shows each option's assumed effects. A `resolves` decision, and a DUE question
-  that resolved, answer `fits`: does what happened match what the option assumed?
+- **The check.** The update prompt now shows each option's assumed effects. Every resolution an update makes (a
+  `resolves` decision, a DUE question that resolved) then goes to a **separate small call**
+  (`outcomes.checkResolutions`, `prompts/situation_resolution_check.md`; wired by `update.withChecks`), which answers
+  `fits`: does what happened match what the option assumed?
+- **Why a separate call.** It was first two fields on the update's own answer. The first live run (dev, 2026-11-24) was
+  refused with "The compiled grammar is too large". Probed live: the old update schema sits at the API's limit. Any ONE
+  of the new fields fits (outside `sectors`, the check on `resolution`, the check on `due`); no two do, not even as their
+  own top-level array, and dropping the enums does not make room. `sectors` stayed; the check moved out. It runs only
+  when something resolves. If it fails, each resolution is taken by its label and the run's gaps say so. **Adding a
+  field to the update schema needs a live probe first.**
 - **When it does not** (`fits: false`), `unforeseen` names the outcome that did happen. That outcome is added as an
   option and resolved to, and the node is mapped, so the industries get the push of what happened rather than of the
   label. If the question is full, it resolves to the named option instead.
@@ -74,7 +82,40 @@ Another rule in the same prompt would be a plaster.
   - The outside list keeps the story and says where it went (`routed_to`, "sent to …" on the board).
 - **The cost of the order:** the sector calls wait for the macro one, about a minute or two more per update.
 
-## 6. Also
+## 6. Follow-up questions (2026-11-24, Roy: "who this CEO can be")
+
+- **The structure was there; nothing used it.** A question can hang under one option of another (`given`); its odds are
+  conditional on that option and it weighs in the industry scores only as much as the option is likely. Prod and dev had
+  **zero**: the build prompt said "do not invent chains", and an update cannot make one (its `new_question` has no
+  `given`, and its schema has no room, §3).
+- **The review makes them.** A third change, `follow_up`: `under_option`, the question, 2–4 options, probabilities AS IF
+  that option happened, a resolve-by date (a past one falls back to the parent's). It is made only when:
+  - the option is at least `FOLLOW_UP_MIN_P` (20%) likely, or its signpost has fired;
+  - the follow-up's options would move industries differently from each other;
+  - the parent hangs under nothing (two levels at most), and no follow-up hangs under that option already.
+  It inherits the parent's tree, layer, origin and lag; it is mapped, linked and logged like a new question, and counts
+  in the review's 8 changes and in its layer's cap. Card: "Follow-up: …, if "Yes" (…)"; board: "follow-up …".
+- **When the parent resolves** (`propagate.dropOrphans`, in every update): to the follow-up's option, it stands (its
+  reach is 1); to another option, or the parent leaves the network, it is dropped as `parent_resolved` with what hangs
+  under it, and never graded.
+- The build prompt now asks for a follow-up where it decides which way industries move, and still for no chains just
+  for structure.
+
+## 7. The watcher keeps material news that must wait (2026-11-24)
+
+- **The miss.** Prod's network has no CEO question. Its build (2026-11-23 15:46) framed the Nvidia story as "How does the
+  accounting issue resolve?"; dev's (13:37) as "Does Nvidia name a permanent CEO?". The two are separate networks, built
+  by separate calls. Then Huang's reinstatement reached prod's watcher after the day's one event update (16:40). The
+  articles were marked seen, the triage's verdict was not even logged, and the story was lost until the weekly.
+- **The fix (`watch.js`).** A material verdict that must wait (the day's event update spent, or the weekly budget) is
+  kept as `pending` (`mergePending`: the earliest time, the reasons joined, the layers' union). Its event update runs on
+  the first tick the gap and the budget allow, without waiting for the next look. A new material story rides along with
+  one already waiting. A scheduled run clears it (it reads the whole week). Every triage verdict is logged (`triages`,
+  the last 30).
+- **What it does not promise.** The event update still decides what the news is: a move, a new question, or outside.
+  Nothing forces a question to open.
+
+## 8. Also
 
 - The state and sector prompts gained one line: split an option when two ways of it happening would move industries
   differently. This is the cheap extra, not the fix.

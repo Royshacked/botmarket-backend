@@ -47,7 +47,10 @@ export function cardLines(run) {
         if (!n) continue
         if (it.why === 'resolved') lines.push(`• Resolved: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option}${unforeseen.has(n.node_id) ? ' (NOT FORESEEN: its options did not have what happened)' : ''}`)
         else if (it.why === 'outcome_added') lines.push(`• Outcome added: ${where(n)}${n.question} + "${n.options.find(o => o.key === it.option)?.label ?? it.option}" — ${opts(n)}`)
-        else if (it.why === 'woken') lines.push(`• ${label.woken}: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option} (${pct(n.options.find(o => o.key === it.option)?.p ?? 0)})`)
+        else if (it.why === 'follow_up') {
+            const p = nodes.get(it.parent)
+            lines.push(`• Follow-up: ${where(n)}${n.question}, if ${p ? `"${p.options.find(o => o.key === it.option)?.label ?? it.option}" (${p.question})` : it.option} — ${opts(n)}`)
+        } else if (it.why === 'woken') lines.push(`• ${label.woken}: ${where(n)}${n.question} → ${n.options.find(o => o.key === it.option)?.label ?? it.option} (${pct(n.options.find(o => o.key === it.option)?.p ?? 0)})`)
         else lines.push(`• ${where(n)}${n.question} (${label[it.why] ?? it.why}${it.by ? `, ${Math.round(it.by * 100)} pts` : ''}) — ${opts(n)}`)
     }
     const kind = run.run.kind === 'event' ? `Event update: ${run.run.trigger}` : run.run.kind === 'rebuild' ? 'Monthly rebuild' : 'Weekly update'

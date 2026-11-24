@@ -1313,6 +1313,9 @@ services/
                             Opus call on every weekly / rebuild over every live question (options + what each ASSUMES, its
                             effects) → add_option (≤ 4: re-set, mapped, LINKED via linksFor's newOptions) or reword (the old
                             question dropped as `reworded`, the new one `split_from` it); ≤ 8 changes, misfits skipped + said.
+                            Also THE RESOLUTION CHECK (checkResolutions, prompts/situation_resolution_check.md): its own
+                            small call whenever an update resolves something (fits / unforeseen; update.withChecks wires it).
+                            Its own call because the update schema sits at the API's grammar limit.
   situation/update.js       runUpdate (weekly | event | rebuild with `fresh` state + candidate questions): ONE Opus call
                             (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
                             new_question / resolves / outside / none), signposts fired, due questions → applyAnswer (live

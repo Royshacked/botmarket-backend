@@ -6,7 +6,7 @@ import { checkBundle } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
 
 // The missing-outcomes review never reaches the model from a test.
-_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }) })
+_setIO({ outcomes: async () => ({ ok: true, data: { changes: [] }, list: [], cost_usd: 0 }), check: async (items) => ({ ok: true, checks: items.map(() => ({ fits: true, unforeseen: null })), cost_usd: 0 }) })
 
 // The code review's fixes (2026-11-23, Roy: "fix all").
 
