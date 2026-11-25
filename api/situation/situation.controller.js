@@ -1,6 +1,7 @@
 import { latestRun, readRun, listRuns, nodeHistory } from '../../services/situation/store.js'
 import { buildScorecard } from '../../services/situation/scorecard.js'
 import { overrideNode } from '../../services/situation/review.js'
+import { runNow, manualStatus } from '../../services/situation/watch.js'
 import { canSeeSituation } from '../../services/situation/access.js'
 import { makeHandle } from '../_shared/handle.util.js'
 import { httpError } from '../../services/httpError.util.js'
@@ -60,4 +61,18 @@ export const postOverride = handle('postOverride', async (req, res) => {
     const r = await overrideNode(req.params.id, p, req.user.id ?? req.user._id)
     if (!r.ok) throw httpError(400, r.reason)
     res.json(r)
+})
+
+/** GET /api/situation/run — what runs now, and the last manual run. Admin only. */
+export const getRunStatus = handle('getRunStatus', async (req, res) => {
+    if (req.user?.role !== 'admin') throw httpError(403, 'running the network is the admin\'s')
+    res.json(await manualStatus())
+})
+
+/** POST /api/situation/run — `{ kind: 'build' | 'weekly' }` started now; 202 once it has started. Admin only. */
+export const postRun = handle('postRun', async (req, res) => {
+    if (req.user?.role !== 'admin') throw httpError(403, 'running the network is the admin\'s')
+    const r = await runNow(req.body?.kind)
+    if (!r.ok) throw httpError(409, r.reason)
+    res.status(202).json({ ok: true, kind: r.kind })
 })

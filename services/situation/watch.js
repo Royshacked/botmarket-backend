@@ -25,7 +25,7 @@ import { buildSectorStates } from './layers.js'
 import { SECTORS, SECTOR_CODES, MACRO, layerOf, layerName, topNames } from './sectors.js'
 import { buildState } from './state.js'
 import { runUpdate, numbered } from './update.js'
-import { latestRun, readRun, COLLECTIONS, setBusy, clearBusy } from './store.js'
+import { latestRun, readRun, COLLECTIONS, setBusy, clearBusy, getBusy } from './store.js'
 import { CONTROL } from './scorecard.js'
 import { postReviewCard } from './review.js'
 import { runControl } from './control.js'
@@ -66,6 +66,7 @@ const _io = {
     payer: async () => { const { houseLedgerUserId } = await import('../../api/user/user.model.js'); return houseLedgerUserId() },
     card: (run_id) => postReviewCard(run_id),
     busy: (kind) => setBusy(kind), free: () => clearBusy(),
+    isBusy: () => getBusy(undefined, { db: () => _io.db(), now: () => _io.now().toISOString() }),
     // The control, once per scheduled run, over the industries the network scored (the same universe).
     control: async (run_id) => { const run = await readRun(run_id); return run?.state ? runControl(run.state, (run.industries ?? []).map(i => ({ code: i.code, name: i.name, level: i.level })), run.run.as_of) : null },
     budget: () => config.situationWeeklyUsd,
@@ -155,11 +156,87 @@ async function spentThisWeek(db, now) {
     return runs.reduce((s, r) => s + (r.stats?.cost_usd ?? 0), 0) + watched + control
 }
 
+// ─── ONE run at a time (Roy's "Run now" beside the schedule, 2026-11-25) ───
+// In this process a claim, taken without waiting; across processes the store's BUSY flag, kept fresh while the run goes on
+// (a fresh build can outlast the flag's half hour).
+
+export const HEARTBEAT_MS = 5 * 60 * 1000
+let _running = null
+export const runningKind = () => _running
+const claim = (kind) => { if (_running) return false; _running = kind; return true }
+
+/** Run a claimed job under the busy flag. */
+async function underFlag(kind, job) {
+    let beat = null
+    try {
+        await _io.busy(kind)
+        beat = setInterval(() => { Promise.resolve(_io.busy(kind)).catch(() => {}) }, HEARTBEAT_MS)
+        beat.unref?.()
+        return await job()
+    } finally {
+        clearInterval(beat)
+        _running = null
+        await Promise.resolve(_io.free()).catch(() => {})
+    }
+}
+
+/** What "Run now" may start: a fresh BUILD (new questions; the old stay as history) or the WEEKLY update. */
+export const MANUAL_KINDS = Object.freeze(['build', 'weekly'])
+
+/**
+ * Start a run now, outside the schedule → `{ ok: true, kind }` as soon as it has STARTED (it takes many minutes), or
+ * `{ ok: false, reason }`. The run is the scheduler's own: the flag, Roy's card and the control after it, its cost
+ * counted. How it went is kept as `manual` on the watch record (`manualStatus`). `done` is its promise, for a test.
+ */
+export async function runNow(kind) {
+    if (!MANUAL_KINDS.includes(kind)) return { ok: false, reason: `run one of: ${MANUAL_KINDS.join(', ')}` }
+    if (!claim(kind)) return { ok: false, reason: `a ${_running} run is going on already` }
+    let coll, started
+    try {
+        const b = await _io.isBusy()
+        if (b) { _running = null; return { ok: false, reason: `a ${b.kind} run is going on already (since ${b.since})` } }
+        if (kind === 'weekly' && !(await _io.latest())) { _running = null; return { ok: false, reason: 'there is no network to update yet — build first' } }
+        coll = (await _io.db()).collection(WATCH)
+        started = _io.now().toISOString()
+        await coll.updateOne({ _id: 'watch' }, { $set: { manual: { kind, started_at: started, finished_at: null } } }, { upsert: true })
+    } catch (err) {
+        _running = null
+        return { ok: false, reason: err.message }
+    }
+    const asOf = started.slice(0, 10)
+    const done = (async () => {
+        let r
+        try { r = await underFlag(kind, () => (kind === 'build' ? _io.build({ asOf, kind }) : _io.update({ kind, asOf }))) } catch (err) { r = { ok: false, reason: err.message } }
+        const at = _io.now().toISOString()
+        try {
+            const w = await coll.findOne({ _id: 'watch' })
+            await coll.updateOne({ _id: 'watch' }, { $set: {
+                manual: { kind, started_at: started, finished_at: at, ok: Boolean(r?.ok), run_id: r?.run_id ?? null, cost_usd: r?.stats?.cost_usd ?? r?.cost_usd ?? null, reason: r?.ok ? null : String(r?.reason ?? 'failed').slice(0, 300) },
+                ...(r?.ok ? { failed: null, pending: null } : { costs: [...(w?.costs ?? []), { at, usd: r?.cost_usd ?? 0, failed: kind }] }),
+            } }, { upsert: true })
+            if (r?.ok) { await _io.card(r.run_id); await _io.control(r.run_id) }
+        } catch (err) { logger.warn(LOG, 'after a manual run', { error: err.message }) }
+        logger.info(LOG, 'manual run', { kind, ok: r?.ok, run_id: r?.run_id, reason: r?.reason })
+        return r
+    })()
+    return { ok: true, kind, done }
+}
+
+/** → `{ running: { kind, since } | null, last }`: what runs now, and the last manual run. */
+export async function manualStatus() {
+    const w = await (await _io.db()).collection(WATCH).findOne({ _id: 'watch' })
+    const b = await _io.isBusy()
+    return { running: b ?? (_running ? { kind: _running, since: null } : null), last: w?.manual ?? null }
+}
+
 /** One tick. Never throws. → what it did. */
 export async function tick() {
     if (!config.situationNetwork) return { off: true }
+    if (_running) return { did: 'busy' }
     const now = _io.now(), today = day(now)
     try {
+        // Another process's run (or Roy's "Run now") goes on: the schedule waits for it.
+        if (await _io.isBusy()) return { did: 'busy' }
         const head = await _io.latest()
         const db = await _io.db()
         const runs = db.collection(COLLECTIONS.runs)
@@ -177,9 +254,8 @@ export async function tick() {
         // A scheduled job, run under the busy flag (overrides wait for it), its failure recorded with its cost and backed off.
         const scheduled = async (k, job) => {
             if (backingOff(w.failed, k, now)) return { did: k, waiting: `the last ${k} failed at ${w.failed.at} (${w.failed.reason}); it is tried again a day later` }
-            await _io.busy(k)
-            let r
-            try { r = await job() } finally { await _io.free() }
+            if (!claim(k)) return { did: 'busy' }
+            const r = await underFlag(k, job)
             if (r.ok) { await save({ failed: null, pending: null }); await _io.card(r.run_id); await _io.control(r.run_id) }
             else await save({ failed: { kind: k, at: now.toISOString(), reason: String(r.reason ?? 'failed').slice(0, 300) }, costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: k }]) })
             return { did: k, ...r }
@@ -199,9 +275,8 @@ export async function tick() {
         // the pending story goes with it.
         const gapOpen = !w.last_event_at || now - new Date(w.last_event_at) >= EVENT_MIN_GAP_MS
         const runEvent = async (trigger, layers) => {
-            await _io.busy('event')
-            let r
-            try { r = await _io.update({ kind: 'event', trigger, asOf: today, layers }) } finally { await _io.free() }
+            if (!claim('event')) return { did: 'busy' }
+            const r = await underFlag('event', () => _io.update({ kind: 'event', trigger, asOf: today, layers }))
             await save({ last_event_at: now.toISOString(), pending: null, ...(r.ok ? {} : { costs: keepCosts([{ at: now.toISOString(), usd: r.cost_usd ?? 0, failed: 'event' }]) }) })
             if (r.ok) await _io.card(r.run_id)
             return { did: 'event', trigger, layers, ...r }

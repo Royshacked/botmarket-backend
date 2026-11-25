@@ -1332,7 +1332,8 @@ services/
                             macro one from the week's news + the live macro questions' reasoning; then
                             sectorState.rewriteSectorState per sector under the new backdrop); a failed rewrite keeps the
                             readings with fresh numbers and is a named gap.
-  situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d from the last SCHEDULED
+  situation/watch.js        runNow / manualStatus (POST / GET /api/situation/run, admin: a build or a weekly now; one run at a
+                            time, the tick waits for it); the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d from the last SCHEDULED
                             run) → else the daily watch (22:00 UTC): Federal Register + FMP news → one Sonnet triage → an EVENT
                             update at most once a day, inside SITUATION_WEEKLY_USD (default $10; failed attempts and the
                             control counted). A failed scheduled job is recorded and waits a day (RETRY_AFTER_MS). Every

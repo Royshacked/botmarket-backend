@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { gate, postOverride } from '../../api/situation/situation.controller.js'
+import { gate, postOverride, postRun, getRunStatus } from '../../api/situation/situation.controller.js'
 
 const res = () => { const r = { code: 200, body: null }; r.status = (c) => { r.code = c; return r }; r.json = (b) => { r.body = b; return r }; return r }
 
@@ -24,6 +24,14 @@ test("an override is the admin's: a trader on the list is refused", async () => 
     let err = null
     await postOverride({ method: 'POST', originalUrl: '/api/situation/nodes/x/override', user: { id: '1780034546842', role: 'trader' }, params: { id: 'node_x' }, body: { p: { a: 1 } } }, res(), (e) => { err = e })
     assert.equal(err?.status, 403, 'the refusal goes to the one error handler')
+})
+
+test("run now is the admin's: a trader on the list is refused, both ways", async () => {
+    for (const [f, method] of [[postRun, 'POST'], [getRunStatus, 'GET']]) {
+        let err = null
+        await f({ method, originalUrl: '/api/situation/run', user: { id: '1780034546842', role: 'trader' }, params: {}, body: { kind: 'build' } }, res(), (e) => { err = e })
+        assert.equal(err?.status, 403)
+    }
 })
 
 test('access: answered for every signed-in user — true on the list, false off it (never a 404)', async () => {

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { dueKind, triagePrompt, tick, mergePending, lookSlot, lookDays, WATCH_MAX_ARTICLES, _setIO, WATCH } from '../../services/situation/watch.js'
+import { runNow, manualStatus, runningKind, dueKind, triagePrompt, tick, mergePending, lookSlot, lookDays, WATCH_MAX_ARTICLES, _setIO, WATCH } from '../../services/situation/watch.js'
 import { cardLines, postReviewCard, overrideNode, _setIO as setReviewIO } from '../../services/situation/review.js'
 import { checkBundle, COLLECTIONS } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
@@ -251,4 +251,45 @@ test('tick: articles already seen take no place under the cap; what the cap cuts
         await tick()
         assert.equal(shown, 5, 'the five cut, read on the next look')
     } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
+})
+
+test('runNow: starts, refuses a second, the tick waits for it; then the card, the control and how it went', async () => {
+    const keep = process.env.SITUATION_NETWORK
+    try {
+        process.env.SITUATION_NETWORK = 'true'
+        const db = fakeDb([]), did = []
+        let finish
+        _setIO({ now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r0', as_of: '2025-01-06' }), isBusy: async () => null,
+            busy: async () => { did.push('flag') }, free: async () => { did.push('free') }, build: () => new Promise(r => { finish = r }), card: async (id) => did.push(`card ${id}`), control: async (id) => did.push(`control ${id}`) })
+        assert.equal((await runNow('rebuild')).ok, false, 'only a build or a weekly')
+        const a = await runNow('build')
+        assert.equal(a.ok, true)
+        assert.equal(runningKind(), 'build')
+        assert.match((await runNow('weekly')).reason, /a build run is going on/)
+        assert.deepEqual(await tick(), { did: 'busy' })
+        assert.equal((await manualStatus()).running.kind, 'build')
+        finish({ ok: true, run_id: 'r1', stats: { cost_usd: 9 } })
+        await a.done
+        assert.deepEqual(did, ['flag', 'free', 'card r1', 'control r1'])
+        const st = await manualStatus()
+        assert.equal(st.running, null)
+        assert.deepEqual([st.last.ok, st.last.run_id, st.last.cost_usd], [true, 'r1', 9])
+    } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
+})
+
+test('runNow: a failure (returned or thrown) is kept with its cost and frees the way; another process busy, or nothing to update, refuses', async () => {
+    const db = fakeDb([])
+    _setIO({ now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => null, isBusy: async () => null, busy: async () => {}, free: async () => {},
+        build: async () => ({ ok: false, reason: 'the state call failed', cost_usd: 0.5 }), card: async () => assert.fail('no card'), control: async () => assert.fail('no control') })
+    assert.match((await runNow('weekly')).reason, /build first/)
+    await (await runNow('build')).done
+    assert.equal((await manualStatus()).last.reason, 'the state call failed')
+    assert.deepEqual(db.store[WATCH][0].costs.map(x => [x.usd, x.failed]), [[0.5, 'build']])
+    _setIO({ build: async () => { throw new Error('boom') } })
+    await (await runNow('build')).done
+    assert.equal((await manualStatus()).last.reason, 'boom')
+    assert.equal(runningKind(), null)
+    _setIO({ isBusy: async () => ({ kind: 'event', since: 'x' }) })
+    assert.match((await runNow('build')).reason, /an? event run/)
+    assert.equal(runningKind(), null, 'a refusal holds nothing')
 })
