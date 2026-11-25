@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { dueKind, triagePrompt, tick, mergePending, lookSlot, _setIO, WATCH } from '../../services/situation/watch.js'
+import { dueKind, triagePrompt, tick, mergePending, lookSlot, lookDays, WATCH_MAX_ARTICLES, _setIO, WATCH } from '../../services/situation/watch.js'
 import { cardLines, postReviewCard, overrideNode, _setIO as setReviewIO } from '../../services/situation/review.js'
 import { checkBundle, COLLECTIONS } from '../../services/situation/store.js'
 import { anchorFor } from '../../services/situation/propagate.js'
@@ -57,19 +57,19 @@ test('tick: the watch — new articles to triage; material news is one event upd
         const db = fakeDb([{ kind: 'build', as_of: '2025-01-05', complete: true }])
         let updates = 0, triaged = 0
         _setIO({
-            sectorsOn: () => false, now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
+            sectorsOn: () => false, now: () => new Date('2025-01-07T22:05:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
             read: async () => ({ nodes: [node('a', { a: 0.5, b: 0.5 })] }),
             policy: async () => [], fmpNews: async () => [{ title: 'Big tariff news', date: '2025-01-07', url: 'https://n/1' }],
             payer: async () => null, call: async () => { triaged++; return { data: { material: true, why: 'tariffs signed', articles: [1] } } },
             update: async (o) => { updates++; assert.equal(o.kind, 'event'); return { ok: true, run_id: 'r2' } }, card: async () => {}, budget: () => 10,
         })
         assert.equal((await tick()).did, 'event')
-        _setIO({ now: () => new Date('2025-01-07T16:00:00Z'), fmpNews: async () => [{ title: 'More news', date: '2025-01-07', url: 'https://n/2' }] })
+        _setIO({ now: () => new Date('2025-01-08T22:01:00Z'), fmpNews: async () => [{ title: 'More news', date: '2025-01-08', url: 'https://n/2' }] })
         assert.equal((await tick()).waiting, 'one event update a day')
-        _setIO({ now: () => new Date('2025-01-07T20:00:00Z'), fmpNews: async () => [{ title: 'More news', date: '2025-01-07', url: 'https://n/2' }] })
+        _setIO({ now: () => new Date('2025-01-09T22:01:00Z'), budget: () => 0, fmpNews: async () => [{ title: 'More news', date: '2025-01-08', url: 'https://n/2' }] })
         assert.deepEqual(await tick(), { did: 'watch', articles: 0 }, 'already seen')
-        _setIO({ now: () => new Date('2025-01-07T18:00:00Z') })
-        assert.deepEqual(await tick(), { did: 'nothing' }, 'inside three hours of the last look')
+        _setIO({ now: () => new Date('2025-01-10T21:50:00Z') })
+        assert.deepEqual(await tick(), { did: 'nothing' }, 'one look a day')
         assert.equal(updates, 1)
         assert.equal(triaged, 2)
     } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
@@ -84,7 +84,7 @@ test('tick: material news that must wait is KEPT and runs once the day has passe
         const events = []
         let verdict = { material: true, why: 'tariffs signed', articles: [1], layers: ['macro'] }
         _setIO({
-            sectorsOn: () => false, now: () => new Date('2025-01-07T12:00:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
+            sectorsOn: () => false, now: () => new Date('2025-01-07T22:05:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
             read: async () => ({ nodes: [node('a', { a: 0.5, b: 0.5 })] }),
             policy: async () => [], fmpNews: async () => [{ title: 'Big tariff news', date: '2025-01-07', url: 'https://n/1' }],
             payer: async () => null, call: async () => ({ data: verdict }),
@@ -92,19 +92,19 @@ test('tick: material news that must wait is KEPT and runs once the day has passe
         })
         assert.equal((await tick()).did, 'event')
         verdict = { material: true, why: 'CEO reinstated', articles: [1], layers: ['45'] }
-        _setIO({ now: () => new Date('2025-01-07T16:00:00Z'), fmpNews: async () => [{ title: 'Huang back', date: '2025-01-07', url: 'https://n/2' }] })
+        _setIO({ now: () => new Date('2025-01-08T22:01:00Z'), fmpNews: async () => [{ title: 'Huang back', date: '2025-01-08', url: 'https://n/2' }] })
         const waited = await tick()
         assert.deepEqual([waited.waiting, waited.pending], ['one event update a day', true])
         verdict = { material: true, why: 'board reshuffle', articles: [1], layers: ['macro'] }
-        _setIO({ now: () => new Date('2025-01-07T20:00:00Z'), fmpNews: async () => [{ title: 'Board news', date: '2025-01-07', url: 'https://n/3' }] })
+        _setIO({ now: () => new Date('2025-01-09T22:01:00Z'), budget: () => 0, fmpNews: async () => [{ title: 'Board news', date: '2025-01-09', url: 'https://n/3' }] })
         await tick()
         const w = () => db.store[WATCH][0]
-        assert.deepEqual(w().pending, { since: '2025-01-07T16:00:00.000Z', why: 'CEO reinstated · board reshuffle', layers: ['45', 'macro'] })
+        assert.deepEqual(w().pending, { since: '2025-01-08T22:01:00.000Z', why: 'CEO reinstated · board reshuffle', layers: ['45', 'macro'] })
         assert.deepEqual(w().triages.map(t => [t.material, t.why]), [[true, 'tariffs signed'], [true, 'CEO reinstated'], [true, 'board reshuffle']])
-        // Still inside the day: it waits. Past it: the pending story runs, without waiting for the next look.
-        _setIO({ now: () => new Date('2025-01-08T11:00:00Z') })
-        assert.deepEqual(await tick(), { did: 'watch', articles: 0 }, 'a look, nothing new; the pending story still waits its day')
-        _setIO({ now: () => new Date('2025-01-08T12:30:00Z') })
+        // The budget is spent: it waits. Open again: the pending story runs, without waiting for the next look.
+        _setIO({ now: () => new Date('2025-01-10T11:00:00Z') })
+        assert.deepEqual(await tick(), { did: 'nothing' }, 'no look is due and the pending story still waits')
+        _setIO({ now: () => new Date('2025-01-10T12:30:00Z'), budget: () => 10 })
         const ran = await tick()
         assert.deepEqual([ran.did, ran.trigger, ran.layers], ['event', 'CEO reinstated · board reshuffle', ['45', 'macro']])
         assert.equal(w().pending, null)
@@ -222,10 +222,33 @@ test('an override waits while an update runs, and refuses if the network moved m
     } finally { if (keep === undefined) delete process.env.SITUATION_USERS; else process.env.SITUATION_USERS = keep }
 })
 
-test('lookSlot: fixed 3-hour UTC windows, so two watchers started at different times look in the same batches', () => {
-    const at = (s) => lookSlot(new Date(s))
-    assert.equal(at('2026-11-24T03:00:00Z'), at('2026-11-24T05:59:59Z'))
-    assert.notEqual(at('2026-11-24T05:59:59Z'), at('2026-11-24T06:00:00Z'))
-    // the old rule (3 h after the last look) would wait until 07:10 after a 04:10 look; the slot looks at 06:00
-    assert.notEqual(at('2026-11-24T04:10:00Z'), at('2026-11-24T06:05:00Z'))
+test('lookSlot: one look a day from 22:00 UTC; lookDays covers the time since the last look, at most a week', () => {
+    const at = (x) => lookSlot(new Date(x))
+    assert.equal(at('2026-11-24T22:00:00Z'), at('2026-11-25T21:59:59Z'))
+    assert.notEqual(at('2026-11-25T21:59:59Z'), at('2026-11-25T22:00:00Z'))
+    const now = new Date('2026-11-25T22:00:00Z')
+    assert.equal(lookDays(null, now), 1)
+    assert.equal(lookDays('2026-11-25T06:01:00Z', now), 1)
+    assert.equal(lookDays('2026-11-23T21:00:00Z', now), 3)
+    assert.equal(lookDays('2026-10-01T22:00:00Z', now), 7)
+})
+
+test('tick: articles already seen take no place under the cap; what the cap cuts is counted, not marked seen', async () => {
+    const keep = process.env.SITUATION_NETWORK
+    try {
+        process.env.SITUATION_NETWORK = 'true'
+        const db = fakeDb([{ kind: 'build', as_of: '2025-01-05', complete: true }])
+        const many = Array.from({ length: WATCH_MAX_ARTICLES + 5 }, (_, i) => ({ title: `N${i}`, date: '2025-01-07', url: `https://n/${i}` }))
+        let shown = 0, days = null
+        _setIO({ sectorsOn: () => false, now: () => new Date('2025-01-07T22:05:00Z'), db: async () => db, latest: async () => ({ run_id: 'r1', as_of: '2025-01-05' }), busy: async () => {}, free: async () => {},
+            read: async () => ({ nodes: [node('a', { a: 0.5, b: 0.5 })] }), policy: async () => [], fmpNews: async (n, d) => { days = d; return many }, payer: async () => null,
+            call: async (a) => { shown = (a.user.match(/N\d+/g) ?? []).length; return { data: { material: false, why: 'quiet', articles: [], layers: [] } } }, card: async () => {}, budget: () => 10 })
+        await tick()
+        assert.equal(shown, WATCH_MAX_ARTICLES)
+        assert.equal(days, 1)
+        assert.equal(db.store[WATCH][0].triages[0].cut, 5)
+        _setIO({ now: () => new Date('2025-01-08T22:05:00Z') })
+        await tick()
+        assert.equal(shown, 5, 'the five cut, read on the next look')
+    } finally { if (keep === undefined) delete process.env.SITUATION_NETWORK; else process.env.SITUATION_NETWORK = keep }
 })

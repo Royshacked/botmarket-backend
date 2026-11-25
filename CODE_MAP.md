@@ -1333,7 +1333,7 @@ services/
                             sectorState.rewriteSectorState per sector under the new backdrop); a failed rewrite keeps the
                             readings with fresh numbers and is a named gap.
   situation/watch.js        the schedule (tick): first build → monthly rebuild (28 d) → weekly (7 d from the last SCHEDULED
-                            run) → else the 3-hourly watch: Federal Register + FMP news → one Sonnet triage → an EVENT
+                            run) → else the daily watch (22:00 UTC): Federal Register + FMP news → one Sonnet triage → an EVENT
                             update at most once a day, inside SITUATION_WEEKLY_USD (default $10; failed attempts and the
                             control counted). A failed scheduled job is recorded and waits a day (RETRY_AFTER_MS). Every
                             update runs under the store's BUSY flag; an override waits for it. After each run, Roy's card.

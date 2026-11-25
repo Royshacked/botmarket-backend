@@ -123,7 +123,7 @@ Another rule in the same prompt would be a plaster.
   `db-backups/2026-11-24-situation-prod-before-align/`. Dev's weekly run `run_54c4ab11…` (2026-11-24) was copied into
   prod as its head (`aligned_from: 'axl_dev'`; its `parent_run_id` names a dev run). Prod's older runs stay as history.
   The watcher's clock and seen list were copied too (prod's own costs kept).
-- **The schedule.** The watch looks once per fixed 3-hour UTC slot (`lookSlot`), not 3 hours after its last look, and
+- **The schedule** (once a DAY from 22:00 UTC since 2026-11-25, Roy). The watch looked once per fixed 3-hour UTC slot (`lookSlot`), not 3 hours after its last look, and
   the monitor ticks every 10 minutes (was hourly). Both networks then read the news in the same batches, within about
   10 minutes of each other, and their weeklies fall on the same day.
 - **What still differs.** Each call's own randomness (the triage, the update). That divergence is now the thing to

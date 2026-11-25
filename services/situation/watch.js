@@ -1,11 +1,11 @@
 // THE EVENT WATCHER AND THE SCHEDULE (docs/design/situation-network.md §11.2; plan step 9).
 //
-// One tick (the monitor's, every hour) decides what is due, cheapest first:
+// One tick (the monitor's, every 10 minutes) decides what is due, cheapest first:
 //   · nothing built yet → the FIRST BUILD (build.js);
 //   · a build or rebuild 28+ days old → the monthly REBUILD: a fresh state whose questions reach the network as
 //     candidates through the update (node identity, and so the forecast record, carries on);
 //   · the last run 7+ days old → the WEEKLY update;
-//   · otherwise, every WATCH_EVERY_MS, the news since the last look (the Federal Register and FMP's general news; no
+//   · otherwise, once a day from WATCH_HOUR_UTC (Roy, 2026-11-25; every 3 hours before), the news since the last look (the Federal Register and FMP's general news; no
 //     GNews, its quota is the weekly build's) goes to ONE cheap triage call against the live questions and their dormant
 //     signposts. Material news → an EVENT update, at most one a day.
 // The weekly LLM budget (SITUATION_WEEKLY_USD) holds the event updates: past it, events wait for the weekly run.
@@ -19,10 +19,9 @@ import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { getDb } from '../../providers/mongodb.provider.js'
 import { echoIntakeService } from '../echoIntake.service.js'
-import { toArticle, mergeArticles, articleLines } from './news.js'
+import { toArticle, mergeArticles, articleLines, fetchSectorNews, FMP_MAX_PAGES } from './news.js'
 import { buildFull, buildSectors } from './build.js'
 import { buildSectorStates } from './layers.js'
-import { fetchSectorNews } from './news.js'
 import { SECTORS, SECTOR_CODES, MACRO, layerOf, layerName, topNames } from './sectors.js'
 import { buildState } from './state.js'
 import { runUpdate, numbered } from './update.js'
@@ -36,7 +35,13 @@ import { logger } from '../logger.service.js'
 const LOG = '[situation.watch]'
 export const TRIAGE_MODEL = 'claude-sonnet-5-5'
 export const TRIAGE_EFFORT = 'low'
-export const WATCH_EVERY_MS = 3 * 60 * 60 * 1000
+/** The daily look: after the US close and the day's releases. A look missed (a process down) is made at the next tick. */
+export const WATCH_HOUR_UTC = 22
+/** A look reads the news since the last one: at least a day, at most a week (a process that was down). */
+export const LOOK_MAX_DAYS = 7
+/** The unseen articles one look gives the triage, newest first; the rest are counted in its log. */
+export const WATCH_MAX_ARTICLES = 300
+export const SEEN_KEPT = 4000
 export const WEEKLY_DAYS = 7
 export const REBUILD_DAYS = 28
 export const EVENT_MIN_GAP_MS = 24 * 60 * 60 * 1000
@@ -49,13 +54,13 @@ const _io = {
     build: (o) => buildFull(o), state: (asOf) => buildState(asOf), update: (o) => runUpdate(o),
     sectors: (o) => buildSectors(o), sectorStates: (o) => buildSectorStates(o), sectorsOn: () => config.situationSectors,
     // The watcher's look at each sector: its Federal Register terms and its largest names' FMP news; no GNews.
-    sectorNews: async (now) => {
+    sectorNews: async (now, days = 1) => {
         const names = await topNames().catch(() => new Map())
         const out = []
-        for (const x of SECTORS) out.push(...(await fetchSectorNews(x, { days: 1, asOf: now.toISOString().slice(0, 10), names: names.get(x.code) ?? [], gnews: false })).articles)
+        for (const x of SECTORS) out.push(...(await fetchSectorNews(x, { days, asOf: now.toISOString().slice(0, 10), names: names.get(x.code) ?? [], gnews: false })).articles)
         return out
     },
-    policy: (now) => echoIntakeService.policy(now, { days: 1 }), fmpNews: (now) => echoIntakeService.news(now, { days: 1, pages: 2 }),
+    policy: (now, days = 1) => echoIntakeService.policy(now, { days }), fmpNews: (now, days = 1) => echoIntakeService.news(now, { days, pages: FMP_MAX_PAGES }),
     call: (args) => callAnthropicStructured(args),
     record: (payer, model, usage) => recordUsage(payer, model, usage, 'situation', { monitor: true }),
     payer: async () => { const { houseLedgerUserId } = await import('../../api/user/user.model.js'); return houseLedgerUserId() },
@@ -99,8 +104,10 @@ export function triageSchema() {
             layers: { type: 'array', items: { type: 'string', enum: [MACRO, ...SECTOR_CODES] } } } }
 }
 
-/** The watch's slot: WATCH_EVERY_MS-wide windows from 00:00 UTC. Pure. */
-export const lookSlot = (d) => Math.floor(d.getTime() / WATCH_EVERY_MS)
+/** The watch's slot: one a day, from WATCH_HOUR_UTC to the next day's. Pure. */
+export const lookSlot = (d) => Math.floor((d.getTime() - WATCH_HOUR_UTC * 36e5) / 864e5)
+/** How many days back a look reads, from the last look. Pure. */
+export const lookDays = (lastAt, now) => (lastAt ? Math.min(LOOK_MAX_DAYS, Math.max(1, Math.ceil((now - new Date(lastAt)) / 864e5))) : 1)
 
 /** How many triage verdicts the watch keeps (its log). */
 export const TRIAGES_KEPT = 30
@@ -202,14 +209,17 @@ export async function tick() {
         // The material story that had to wait runs as soon as it may.
         if (w.pending && gapOpen && (await spentThisWeek(db, now)) < _io.budget()) return runEvent(w.pending.why, w.pending.layers)
         // The watch.
-        // One look per fixed 3-hour UTC slot (00:00, 03:00, …), not 3 hours after the last look: two networks (prod and
-        // dev, aligned 2026-11-24) then read the news in the same batches whatever time their processes started.
+        // One look per fixed daily slot, not a day after the last look: two networks (prod and dev, aligned 2026-11-24) then
+        // read the news in the same batches whatever time their processes started.
         if (w.last_at && lookSlot(new Date(w.last_at)) === lookSlot(now)) return { did: 'nothing' }
-        const raw = [...(await _io.policy(now).catch(() => [])).map(r => toArticle(r, 'Federal Register')), ...(await _io.fmpNews(now).catch(() => [])).map(r => toArticle(r, 'FMP news'))]
-        const sectorRaw = _io.sectorsOn() ? await _io.sectorNews(now).catch(() => []) : []
+        const days = lookDays(w.last_at, now)
+        const raw = [...(await _io.policy(now, days).catch(() => [])).map(r => toArticle(r, 'Federal Register')), ...(await _io.fmpNews(now, days).catch(() => [])).map(r => toArticle(r, 'FMP news'))]
+        const sectorRaw = _io.sectorsOn() ? await _io.sectorNews(now, days).catch(() => []) : []
         const seen = new Set(w.seen ?? [])
-        const fresh = mergeArticles([raw, sectorRaw], today, 120).filter(a => !seen.has(a.url ?? a.title))
-        const keepSeen = [...seen, ...fresh.map(a => a.url ?? a.title)].slice(-1000)
+        // Unseen first, THEN the cap: articles already read must not take its places.
+        const unseen = mergeArticles([raw, sectorRaw], today, Infinity).filter(a => !seen.has(a.url ?? a.title))
+        const fresh = unseen.slice(0, WATCH_MAX_ARTICLES)
+        const keepSeen = [...seen, ...fresh.map(a => a.url ?? a.title)].slice(-SEEN_KEPT)
         if (!fresh.length) { await save({ last_at: now.toISOString(), seen: keepSeen }); return { did: 'watch', articles: 0 } }
         const prev = await _io.read(head.run_id)
         let cost = 0, payer = null
@@ -219,7 +229,7 @@ export async function tick() {
         const material = Boolean(res?.data?.material)
         const why = String(res?.data?.why ?? (res?.data ? '' : 'the triage returned no answer')).slice(0, 280)
         const layers = material ? eventLayers(res.data.layers) : []
-        const triages = [...(w.triages ?? []), { at: now.toISOString(), articles: fresh.length, material, why, layers }].slice(-TRIAGES_KEPT)
+        const triages = [...(w.triages ?? []), { at: now.toISOString(), articles: fresh.length, ...(unseen.length > fresh.length ? { cut: unseen.length - fresh.length } : {}), material, why, layers }].slice(-TRIAGES_KEPT)
         await save({ last_at: now.toISOString(), seen: keepSeen, costs: keepCosts([{ at: now.toISOString(), usd: cost }]), triages })
         w.costs = keepCosts([{ at: now.toISOString(), usd: cost }])
         if (!material) return { did: 'watch', articles: fresh.length, material: false }
