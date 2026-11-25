@@ -1346,7 +1346,7 @@ services/
   situation/scorecard.js    the forward test (buildScorecard): nodeScores (Brier vs equal odds, calibration buckets; groups
                             accepted / overridden / Roy's), spreads (long ≥ 60% − short ≥ 60% vs the equal-weight basket; the ~3 MB basket
                             lines read only once a call is 88+ days old, cached 6 h —
-                            average at 63 / 126 bars), the declared verdict (5 checks). control.js: the plain question
+                            average at 63 / 126 bars; FAR calls bars 126→252 / 504, beside the verdict; byDistance), the declared verdict (5 checks). control.js: the plain question
                             weekly, no network (`situation_control`), scored the same way. Per layer: Brier for macro and
                             for the sectors; the industry spread also for the macro layer alone (`macro_only`).
   tools/situation.tools.js  get_situation (Axl; ALLOW-LIST only — axl.agent toolsForUser drops it for everyone else):

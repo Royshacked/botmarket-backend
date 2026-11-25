@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { nodeScores, spreads, spreadSummary, verdict, PASS } from '../../services/situation/scorecard.js'
+import { nodeScores, spreads, spreadSummary, verdict, callsOf, byDistance, FAR_HORIZONS, HORIZONS, PASS } from '../../services/situation/scorecard.js'
 import { runControl, controlSchema, _setIO } from '../../services/situation/control.js'
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`)
@@ -59,4 +59,40 @@ test('runControl: the plain question stored by date; unknown codes and impossibl
     assert.deepEqual(stored.rows.map(x => x.code), ['G'])
     assert.equal(stored.as_of, '2025-01-07')
     assert.equal(controlSchema().properties.industries.items.additionalProperties, false)
+})
+
+test('spreads from a later bar: only the move between `from` and `h` counts; not enough bars, no grade', () => {
+    const dates = Array.from({ length: 30 }, (_, i) => `2025-01-${String(i + 1).padStart(2, '0')}`)
+    const flat = (id) => ({ _id: id, dates, levels: dates.map(() => 100) })
+    const early = { _id: 'sub_industry:E', dates, levels: dates.map((_, i) => (i > 4 ? 150 : 100)) }   // moves before `from`
+    const late = { _id: 'sub_industry:L', dates, levels: dates.map((_, i) => (i > 15 ? 110 : 100)) }
+    const index = [early, late, flat('sub_industry:S'), ...Array.from({ length: 10 }, (_, i) => flat(`sub_industry:f${i}`))]
+    const call = (long) => [{ as_of: '2025-01-03', long: [long], short: ['sub_industry:S'] }]
+    near(spreads(call('sub_industry:E'), index, 20, 8)[0].spread, 0)
+    near(spreads(call('sub_industry:L'), index, 20, 8)[0].spread, 0.1)
+    near(spreads(call('sub_industry:E'), index, 20)[0].spread, 0.5)
+    assert.equal(spreads(call('sub_industry:L'), index, 28, 8).length, 0)
+    assert.equal(FAR_HORIZONS.m12.from, HORIZONS.m6, 'far starts where near ends')
+})
+
+test('callsOf: near from the row, far from its far score; a row with none (an old run) makes no far call', () => {
+    const rows = [{ level: 'industry', code: 'A', p_win: 0.7, p_lose: 0, far: { p_win: 0, p_lose: 0.65 } }, { level: 'industry', code: 'B', p_win: 0.1, p_lose: 0.6 }]
+    assert.deepEqual(callsOf(rows, 'd'), { as_of: 'd', long: ['industry:A'], short: ['industry:B'] })
+    assert.deepEqual(callsOf(rows, 'd', r => r.far), { as_of: 'd', long: [], short: ['industry:A'] })
+})
+
+test('byDistance: by the days from when the number was set to its resolve-by date; overdue counts as under 6 months, undated nowhere', () => {
+    const setOn = new Map([['r1', '2026-01-01']])
+    const row = (node_id, resolve_by) => [{ run_id: 'r1', node_id, option: 'y', p: 0.8, set_by: 'llm', outcome: 1, resolve_by }, { run_id: 'r1', node_id, option: 'n', p: 0.2, set_by: 'llm', outcome: 0, resolve_by }]
+    const d = byDistance([...row('a', '2026-03-31'), ...row('b', '2026-07-03'), ...row('c', '2026-07-04'), ...row('d', '2027-06-30'), ...row('e', null), ...row('f', '2025-12-30')], setOn)
+    assert.deepEqual([d.under_6m.questions, d['6_to_12m'].questions, d.over_12m.questions], [3, 1, 1])
+})
+
+test('runControl keeps the far pair; an impossible one is dropped, not the row', async () => {
+    let stored = null
+    _setIO({ payer: async () => null, db: async () => ({ collection: () => ({ updateOne: async (q, u) => { stored = u.$set } }) }),
+        call: async () => ({ data: { industries: [{ code: 'G', p_win: 0.7, p_lose: 0.1, far_win: 0.2, far_lose: 0.6 }, { code: 'H', p_win: 0.5, p_lose: 0.1, far_win: 0.8, far_lose: 0.8 }] } }) })
+    await runControl({ sections: { regime: [] } }, [{ code: 'G', name: 'Gold', level: 'industry' }, { code: 'H', name: 'Homes', level: 'industry' }], '2025-01-07')
+    assert.deepEqual(stored.rows.map(r => r.far), [{ p_win: 0.2, p_lose: 0.6 }, null])
+    assert.ok(controlSchema().properties.industries.items.required.includes('far_win'))
 })

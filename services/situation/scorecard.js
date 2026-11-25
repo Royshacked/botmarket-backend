@@ -6,6 +6,8 @@
 // overrides. A question counts once however many times its numbers were logged.
 // INDUSTRIES: at each run, "long" = chance it wins ≥ 60%, "short" = chance it loses ≥ 60%; long minus short, each
 // against the equal-weight average of every industry_index basket, at 63 and 126 trading days (3 and 6 months).
+// FAR (horizons §5): the far window's calls, graded from month 6 on — to month 12 (an early read) and to month 24.
+// Reported beside, never in the verdict: the first full far grade comes 24 months in.
 // CONTROL: the same model asked weekly, with no network, which industries win over six months (control.js), scored the
 // same way.
 // PASS when ALL hold: (1) Brier better than equal odds on ≥ 100 resolved questions; (2) calibration within 10 points in
@@ -18,6 +20,10 @@ import { COLLECTIONS } from './store.js'
 
 export const CALL_AT = 0.6
 export const HORIZONS = Object.freeze({ m3: 63, m6: 126 })
+/** The far window's grades, `{ from, to }` in trading days after the call: month 6 to 12, and month 6 to 24. */
+export const FAR_HORIZONS = Object.freeze({ m12: { from: 126, to: 252 }, m24: { from: 126, to: 504 } })
+/** How far out a question was when its numbers were set, in days to its resolve-by date. */
+export const DISTANCES = Object.freeze([['under_6m', 0, 183], ['6_to_12m', 184, 366], ['over_12m', 367, Infinity]])
 export const BUCKET_EDGES = Object.freeze([0, 0.2, 0.4, 0.6, 0.8, 1.0001])
 export const PASS = Object.freeze({ minQuestions: 100, calibrationPts: 0.10, minPerBucket: 15, tMin: 2, minMonths: 12 })
 export const CONTROL = 'situation_control'
@@ -72,11 +78,12 @@ export function nodeScores(rows) {
 }
 
 /**
- * Each scored date's long-minus-short against the equal-weight average of all baskets, `h` bars on. `calls` is
+ * Each scored date's long-minus-short against the equal-weight average of all baskets, from `from` bars after the call
+ * (0: the call itself) to `h` bars after it. `calls` is
  * `[{ as_of, long: [basket], short: [basket] }]`; `index` the industry_index docs. A date without `h` bars after it is
  * skipped. → `[{ as_of, spread }]`. Pure.
  */
-export function spreads(calls, index, h) {
+export function spreads(calls, index, h, from = 0) {
     const out = []
     for (const c of calls) {
         if (!c.long.length || !c.short.length) continue
@@ -84,7 +91,7 @@ export function spreads(calls, index, h) {
         for (const d of index) {
             const i = (d.dates ?? []).findIndex(x => x > c.as_of)
             if (i < 1 || i - 1 + h >= d.dates.length) continue
-            rets.set(d._id, d.levels[i - 1 + h] / d.levels[i - 1] - 1)
+            rets.set(d._id, d.levels[i - 1 + h] / d.levels[i - 1 + from] - 1)
         }
         if (rets.size < 10) continue
         const avg = mean([...rets.values()])
@@ -117,6 +124,18 @@ export function onePerWeek(items) {
     const m = new Map()
     for (const x of items) m.set(isoWeek(x.as_of), x)
     return [...m.values()]
+}
+
+/** One run's rows → its long and short baskets at CALL_AT; `pick` reads the score of a row (null: no score there). Pure. */
+export function callsOf(rows, as_of, pick = (r) => r) {
+    const side = (k) => rows.filter(r => (pick(r)?.[k] ?? 0) >= CALL_AT).map(r => `${r.level}:${r.code}`)
+    return { as_of, long: side('p_win'), short: side('p_lose') }
+}
+
+/** Forecasts by how far out their question was when they were set (`setOn`: run_id → as_of); undated ones left out. Pure. */
+export function byDistance(rows, setOn) {
+    const days = (r) => (r.resolve_by && setOn.get(r.run_id) ? Math.round((Date.parse(r.resolve_by) - Date.parse(setOn.get(r.run_id))) / 864e5) : null)
+    return Object.fromEntries(DISTANCES.map(([k, lo, hi]) => [k, nodeScores(rows.filter(r => { const d = days(r); return d != null && Math.max(0, d) >= lo && d <= hi })).all]))
 }
 
 /** Graded rows → `{ questions, of }`: how many resolved questions were won by an option a forecast lacked. Pure. */
@@ -163,15 +182,16 @@ export async function buildScorecard() {
     // override, which would add near-identical, overlapping 6-month windows and inflate the t-stat (code review
     // 2026-11-23). The control likewise, one per week.
     const weekly = scoredRuns(runs)
-    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: weekly.map(r => r.run_id) } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1, macro: 1 } }).toArray()
+    const inds = await db.collection(COLLECTIONS.industries).find({ run_id: { $in: weekly.map(r => r.run_id) } }, { projection: { _id: 0, run_id: 1, level: 1, code: 1, p_win: 1, p_lose: 1, macro: 1, 'far.p_win': 1, 'far.p_lose': 1 } }).toArray()
     const byRun = new Map()
     for (const i of inds) { if (!byRun.has(i.run_id)) byRun.set(i.run_id, []); byRun.get(i.run_id).push(i) }
-    const callsOf = (rows, as_of) => ({ as_of, long: rows.filter(r => r.p_win >= CALL_AT).map(r => `${r.level}:${r.code}`), short: rows.filter(r => r.p_lose >= CALL_AT).map(r => `${r.level}:${r.code}`) })
     const calls = weekly.map(r => callsOf(byRun.get(r.run_id) ?? [], r.as_of))
     // The macro layer ALONE (situation-network-layers.md §6): its own chances where the run kept them; a run from before
     // the sector layer WAS the macro layer.
     const macroCalls = weekly.map(r => callsOf((byRun.get(r.run_id) ?? []).map(i => (i.macro ? { ...i, ...i.macro } : i)), r.as_of))
     const ctrl = onePerWeek(control).map(c => callsOf(c.rows ?? [], c.as_of))
+    const farCalls = weekly.map(r => callsOf(byRun.get(r.run_id) ?? [], r.as_of, i => i.far))
+    const farCtrl = onePerWeek(control).map(c => callsOf(c.rows ?? [], c.as_of, i => i.far))
     // Only forecasts logged by a run that was SAVED whole count (a save that failed part-way leaves rows behind).
     const complete = new Set(runs.map(r => r.run_id))
     const counted = forecasts.filter(f => complete.has(f.run_id))
@@ -181,9 +201,12 @@ export async function buildScorecard() {
     // UNFORESEEN (situation-network-outcomes.md §4): resolved questions won by an outcome some forecast of theirs did not have
     // as an option (the grading's `absent` rows). The missing-outcomes review works if this share falls.
     const unforeseen = unforeseenCount(counted)
+    const distance = byDistance(counted, new Map(runs.map(r => [r.run_id, r.as_of])))
+    const farOf = (xs) => Object.fromEntries(Object.entries(FAR_HORIZONS).map(([k, { from, to }]) => [k, spreadSummary(spreads(xs, index, to, from))]))
+    const far = { ...farOf(farCalls), control: farOf(farCtrl) }
     const net = { m3: spreadSummary(spreads(calls, index, HORIZONS.m3)), m6: spreadSummary(spreads(calls, index, HORIZONS.m6)) }
     const macroOnly = { m3: spreadSummary(spreads(macroCalls, index, HORIZONS.m3)), m6: spreadSummary(spreads(macroCalls, index, HORIZONS.m6)) }
     const plain = { m3: spreadSummary(spreads(ctrl, index, HORIZONS.m3)), m6: spreadSummary(spreads(ctrl, index, HORIZONS.m6)) }
     const startedOn = runs.find(r => r.kind === 'build')?.as_of ?? null
-    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, unforeseen, industries: net, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
+    return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, distance, unforeseen, industries: net, far, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
 }

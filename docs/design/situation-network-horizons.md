@@ -1,6 +1,6 @@
 # The situation network: horizons and the cap (2026-11-25)
 
-Status: steps 1–3 (§2–4) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
+Status: steps 1–4 (§2–5) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
 [situation-network-layers.md](situation-network-layers.md), [situation-network-outcomes.md](situation-network-outcomes.md).
 To land BEFORE the forward test starts: every step changes what is being tested.
 
@@ -101,7 +101,7 @@ re-mapping plus a rebuild to fill the new places. To be measured on dev before p
 1. Ranking, reserved places, the per-tree limit, macro 30 (§2).
 2. `starts` / `lasts`, agreement, expiry (§3). Probe the mapping schema live before building on it.
 3. BUILT: near and far scores, the board, Axl's tool (§4).
-4. Grading and the control (§5).
+4. BUILT: grading and the control (§5).
 5. Long questions (§6).
 6. Dev: re-map, rebuild, two weekly runs, cost measured. Then prod is aligned again, then the forward test.
 
