@@ -151,12 +151,12 @@ export function anchorLinks(nodes, newLinks) {
  * layer's work), the links between them, their effects — written onto each row as `macro: { p_win, p_lose }` (0 / 0
  * where no macro branch reaches it). Pure.
  */
-export function withMacroScores(rows, nodes, links, effects, industries) {
+export function withMacroScores(rows, nodes, links, effects, industries, opts = {}) {
     const macroNodes = nodes.filter(n => originOf(n) === MACRO)
     const ids = new Set(macroNodes.map(n => n.node_id))
     const macroEffects = new Map([...effects].filter(([k]) => ids.has(k.split('|')[0])))
     const macroLinks = links.filter(l => ids.has(l.from.node_id) && ids.has(l.to.node_id))
-    const m = new Map(scoreIndustries(macroNodes, macroLinks, macroEffects, industries).map(r => [r.code, r]))
+    const m = new Map(scoreIndustries(macroNodes, macroLinks, macroEffects, industries, opts).map(r => [r.code, r]))
     return rows.map(r => ({ ...r, macro: { p_win: m.get(r.code)?.p_win ?? 0, p_lose: m.get(r.code)?.p_lose ?? 0 } }))
 }
 

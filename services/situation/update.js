@@ -474,7 +474,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         // Industries re-scored over every path (and over the macro layer alone); early warnings beside the scores.
         const inds = (exp?.industries?.length ? exp.industries : (prev.industries ?? []).map(r => ({ code: r.code, name: r.name, level: r.level })))
         const effects = effectsFromNodes(nodes)
-        const scored = withMacroScores(scoreIndustries(nodes, links, effects, inds), nodes, links, effects, inds)
+        const scored = withMacroScores(scoreIndustries(nodes, links, effects, inds, { asOf }), nodes, links, effects, inds, { asOf })
         const early = applied.woken.map(w => {
             const n = nodes.find(x => x.node_id === w.node_id), o = n?.options.find(x => x.key === w.option)
             return { node_id: w.node_id, option: w.option, question: n?.question, label: o?.label, p: o?.p, evidence: w.evidence,

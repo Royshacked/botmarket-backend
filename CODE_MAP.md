@@ -1264,6 +1264,8 @@ services/
   situation/sectors.js      the 11 sectors (code, name, two GNews topics, two Federal Register terms — the network's own),
                             sectorOf(code) by the GICS prefix, layerOf / layerName, SECTOR_CAP 3, SECTORS_TOTAL_CAP 30,
                             PROMOTE_AT 3, topNames (each sector's largest names by market cap, gics_companies).
+  situation/horizon.js      when an effect is active (starts / lasts → days; effectWindow, effectEnded, agreeTimes) —
+                            situation-network-horizons.md §3.
   situation/sectorState.js  buildSectorState: the macro BACKDROP and the sector's PRICES by code + its news → ONE Opus call
                             (prompts/situation_sector_state.md, effort medium): its news, policy, calendar, 1–6 questions.
   situation/layers.js       buildSectorStates / buildSectorLayer (each sector's state → its network at the sector cap → ONE

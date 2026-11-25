@@ -1,6 +1,6 @@
 # The situation network: horizons and the cap (2026-11-25)
 
-Status: step 1 (§2) built 2026-11-25 ; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
+Status: steps 1–2 (§2–3) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
 [situation-network-layers.md](situation-network-layers.md), [situation-network-outcomes.md](situation-network-outcomes.md).
 To land BEFORE the forward test starts: every step changes what is being tested.
 
@@ -54,12 +54,14 @@ Two fields on each effect, in the MAPPING call's schema (the update schema is at
   + `starts`, for `lasts`. A live question with no `resolve_by` counts from the run's date.
 - The two mapping runs must agree on industry and direction, as now. Where they differ on time, the LATER start and the
   SHORTER length are kept (the same caution as the smaller size).
-- **Expiry:** a resolved question whose every effect has ended leaves the scoring. It stays in the records.
+- **Expiry, per effect:** a resolved question's effect that has ended leaves the scoring; its longer ones stay. The question
+  stays in the records.
 - A question answered this quarter with a long effect (Roy's example) becomes expressible: `resolve_by` February,
   `starts: months`, `lasts: years`.
 - `lag` is not used for this. It stays as it is.
-- **Migration:** the live branches have neither field. One mapping run over the whole network fills them (a one-off).
-  Until then a missing field reads as `now` + `quarters`.
+- **No migration:** the live branches have neither field, and a missing field reads as `now` + `quarters`. Step 6's fresh
+  BUILD maps everything anew (it must be a build: a rebuild carries old questions over, and the first build's have no
+  impact saved).
 
 ## 4. Two scores (`industries.scoreIndustries`)
 

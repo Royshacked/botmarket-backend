@@ -108,7 +108,7 @@ export async function buildFull({ asOf = new Date().toISOString().slice(0, 10), 
             dropped: [...net.dropped.dropped, ...sec.dropped], asOf,
         })
         const effects = effectsFromNodes(done.nodes)
-        const industries = withMacroScores(scoreIndustries(done.nodes, done.links, effects, exp.industries), done.nodes, done.links, effects, exp.industries)
+        const industries = withMacroScores(scoreIndustries(done.nodes, done.links, effects, exp.industries, { asOf }), done.nodes, done.links, effects, exp.industries, { asOf })
         const prevRun = await _io.latestRun().catch(() => null)
         const prev = prevRun ? (await _io.readRun(prevRun.run_id).catch(() => null))?.industries ?? [] : []
         const entries = wouldBeEntries(prev, industries, asOf)
@@ -164,7 +164,7 @@ export async function buildSectors({ asOf = new Date().toISOString().slice(0, 10
             dropped: [...(pd.dropped ?? []), ...sec.dropped], asOf,
         })
         const effects = effectsFromNodes(done.nodes)
-        const industries = withMacroScores(scoreIndustries(done.nodes, done.links, effects, exp.industries), done.nodes, done.links, effects, exp.industries)
+        const industries = withMacroScores(scoreIndustries(done.nodes, done.links, effects, exp.industries, { asOf }), done.nodes, done.links, effects, exp.industries, { asOf })
         const entries = wouldBeEntries(prev.industries ?? [], industries, asOf)
         const stats = {
             cost_usd: total(), cost_by_stage: cost, gaps: [...(data.gaps ?? []), ...exp.gaps, ...sec.gaps], nodes: done.nodes.length, links: done.links.length,

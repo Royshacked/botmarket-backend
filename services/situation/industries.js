@@ -15,7 +15,8 @@ import { dirname, join } from 'path'
 import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
-import { BUCKETS } from './model.js'
+import { BUCKETS, STARTS, LASTS } from './model.js'
+import { agreeTimes, effectEnded } from './horizon.js'
 import { marginal } from './propagate.js'
 import { exposureLine } from './exposure.js'
 import { logger } from '../logger.service.js'
@@ -47,8 +48,9 @@ export function mapSchema() {
             type: 'object', additionalProperties: false, required: ['branch', 'effects'],
             properties: {
                 branch: { type: 'integer' },
-                effects: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['code', 'direction', 'bucket', 'why'],
-                    properties: { code: { type: 'string' }, direction: { type: 'string', enum: ['up', 'down'] }, bucket: { type: 'string', enum: [...BUCKETS] }, why: { type: 'string' } } } },
+                effects: { type: 'array', items: { type: 'object', additionalProperties: false, required: ['code', 'direction', 'bucket', 'starts', 'lasts', 'why'],
+                    properties: { code: { type: 'string' }, direction: { type: 'string', enum: ['up', 'down'] }, bucket: { type: 'string', enum: [...BUCKETS] },
+                        starts: { type: 'string', enum: [...STARTS] }, lasts: { type: 'string', enum: [...LASTS] }, why: { type: 'string' } } } },
             },
         } } },
     }
@@ -74,7 +76,7 @@ export function mapPrompt(branches, industries) {
     ].join('\n')
 }
 
-/** The model's answer → `Map("node|option" → [{ code, direction, bucket, why }])`, unknown codes dropped. Pure. */
+/** The model's answer → `Map("node|option" → [{ code, direction, bucket, why, starts, lasts }])`, unknown codes dropped. Pure. */
 export function shapeEffects(data, branches, codes) {
     const out = new Map()
     let dropped = 0
@@ -85,7 +87,8 @@ export function shapeEffects(data, branches, codes) {
         for (const e of b.effects ?? []) {
             if (!codes.has(String(e.code)) || !['up', 'down'].includes(e.direction) || !BUCKETS.includes(e.bucket)) { dropped++; continue }
             if (effects.some(x => x.code === String(e.code))) continue
-            effects.push({ code: String(e.code), direction: e.direction, bucket: e.bucket, why: String(e.why ?? '').slice(0, 300) })
+            effects.push({ code: String(e.code), direction: e.direction, bucket: e.bucket, why: String(e.why ?? '').slice(0, 300),
+                ...(STARTS.includes(e.starts) ? { starts: e.starts } : {}), ...(LASTS.includes(e.lasts) ? { lasts: e.lasts } : {}) })
             if (effects.length >= MAX_PER_BRANCH) break
         }
         out.set(`${br.node_id}|${br.option}`, effects)
@@ -98,7 +101,7 @@ export const MAP_RUNS = 2
 
 /**
  * Two runs' effects → only those both runs name for the same branch, with the same direction; the size is the SMALLER
- * of the two buckets (the first live build mapped Health Care Technology up on US strikes on Iran — one run's noise).
+ * of the two buckets, the start the LATER and the length the SHORTER (the first live build mapped Health Care Technology up on US strikes on Iran — one run's noise).
  * Pure.
  */
 export function agreeEffects(a, b) {
@@ -110,7 +113,7 @@ export function agreeEffects(a, b) {
         for (const x of xs) {
             const y = ys.find(e => e.code === x.code && e.direction === x.direction)
             if (!y) { disagreed++; continue }
-            kept.push(BUCKET_WEIGHT[y.bucket] < BUCKET_WEIGHT[x.bucket] ? { ...x, bucket: y.bucket } : x)
+            kept.push({ ...x, bucket: BUCKET_WEIGHT[y.bucket] < BUCKET_WEIGHT[x.bucket] ? y.bucket : x.bucket, ...agreeTimes(x, y) })
         }
         disagreed += ys.filter(y => !xs.some(x => x.code === y.code && x.direction === y.direction)).length
         out.set(k, kept)
@@ -166,11 +169,13 @@ export function walkOrder(nodes) {
 
 /**
  * Sample the network `samples` times and add up each industry's effects → rows for model.checkIndustry, best chance
- * of winning first. `industries` gives names; `effects` is mapBranches' map. Pure.
+ * of winning first. `industries` gives names; `effects` is mapBranches' map. With
+ * `asOf`, a resolved question's effect that has ended (horizon.js) no longer counts. Pure.
  */
-export function scoreIndustries(nodes, links, effects, industries, { samples = SAMPLES, seed = SEED } = {}) {
+export function scoreIndustries(nodes, links, effects, industries, { samples = SAMPLES, seed = SEED, asOf = null } = {}) {
     const order = walkOrder(nodes)
     const map = new Map(nodes.map(n => [n.node_id, n]))
+    const acting = new Map(order.flatMap(n => n.options.map(o => [`${n.node_id}|${o.key}`, (effects.get(`${n.node_id}|${o.key}`) ?? []).filter(e => !effectEnded(n, e, asOf))])))
     const marg = new Map(links.map(l => [l.link_id, marginal(nodes, l.from.node_id, l.from.option, map)]))
     const into = new Map()
     for (const l of links) if (l.live !== false) { if (!into.has(l.to.node_id)) into.set(l.to.node_id, []); into.get(l.to.node_id).push(l) }
@@ -178,8 +183,7 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
     const levels = new Map(industries.map(i => [i.code, i.level]))
     // Only what a sample can draw: a dropped or split question's effects never fire, and an industry mapped only there
     // came out 0% / 0% with no path (prod, 2026-11-24: Rail and Cargo Ground, from a question dropped that run).
-    const drawable = order.flatMap(n => n.options.map(o => effects.get(`${n.node_id}|${o.key}`) ?? []))
-    const codes = [...new Set(drawable.flat().map(e => e.code))]
+    const codes = [...new Set([...acting.values()].flat().map(e => e.code))]
     const win = new Map(codes.map(c => [c, 0])), lose = new Map(codes.map(c => [c, 0])), sumNet = new Map(codes.map(c => [c, 0]))
     const contrib = new Map(codes.map(c => [c, new Map()]))   // code → "node|option" → signed weight × count
     const rand = rng(seed)
@@ -202,7 +206,7 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
         }
         const net = new Map()
         for (const [id, opt] of drawn) {
-            for (const e of effects.get(`${id}|${opt}`) ?? []) {
+            for (const e of acting.get(`${id}|${opt}`) ?? []) {
                 const v = (e.direction === 'up' ? 1 : -1) * BUCKET_WEIGHT[e.bucket]
                 net.set(e.code, (net.get(e.code) ?? 0) + v)
                 const c = contrib.get(e.code)

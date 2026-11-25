@@ -104,7 +104,7 @@ export async function overrideNode(node_id, p, userId) {
     const spread = propagate(nodes, prev.links)
     const inds = (prev.industries ?? []).map(r => ({ code: r.code, name: r.name, level: r.level }))
     const effects = effectsFromNodes(spread.nodes)
-    const industries = withMacroScores(scoreIndustries(spread.nodes, prev.links, effects, inds), spread.nodes, prev.links, effects, inds)
+    const industries = withMacroScores(scoreIndustries(spread.nodes, prev.links, effects, inds, { asOf }), spread.nodes, prev.links, effects, inds, { asOf })
     const forecasts = n.options.map((o, i) => ({ node_id, option: o.key, p: xs[i] / sum, set_by: 'roy', llm_p: o.p, resolve_by: n.resolve_by, layer: originOf(n) }))
     // The network must still be where this override started from.
     if ((await _io.latest())?.run_id !== head.run_id) return { ok: false, reason: 'the network changed meanwhile — open it again and re-enter your numbers' }

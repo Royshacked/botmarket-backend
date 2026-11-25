@@ -23,6 +23,9 @@ export const NODE_STATUSES = Object.freeze(['live', 'resolved', 'dropped', 'spli
 export const SET_BY = Object.freeze(['llm', 'roy'])
 export const CONFIDENCE = Object.freeze(['low', 'high'])
 export const BUCKETS = Object.freeze(['small', 'medium', 'large'])
+/** When an effect starts after its branch happens, and how long it lasts — in order (horizon.js has the days). */
+export const STARTS = Object.freeze(['now', 'months', 'next_year'])
+export const LASTS = Object.freeze(['weeks', 'quarters', 'years'])
 export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'story_full', 'reworded', 'parent_resolved'])
 export const EVENT_DECISIONS = Object.freeze(['moves_option', 'new_option', 'new_question', 'resolves', 'outside'])
 
@@ -142,10 +145,11 @@ export function checkNode(input = {}) {
         if (!text(o.label, 160)) return bad(`"${question.slice(0, 40)}": option ${o.key} needs a label`)
         if (!isProb(o.p)) return bad(`"${question.slice(0, 40)}": option ${o.key} needs p between 0 and 1`)
         // A branch's industry effects (industries.js mapBranches), kept on the branch so an update re-scores without
-        // mapping again: [{ code, direction up|down, bucket, why }].
+        // mapping again: [{ code, direction up|down, bucket, why, starts, lasts }] (no times on one mapped before 2026-11-25).
         const effects = (Array.isArray(o.effects) ? o.effects : [])
             .filter(e => e && e.code && ['up', 'down'].includes(e.direction) && BUCKETS.includes(e.bucket))
-            .slice(0, 8).map(e => ({ code: String(e.code), direction: e.direction, bucket: e.bucket, why: text(e.why, 300) || null }))
+            .slice(0, 8).map(e => ({ code: String(e.code), direction: e.direction, bucket: e.bucket, why: text(e.why, 300) || null,
+                ...(STARTS.includes(e.starts) ? { starts: e.starts } : {}), ...(LASTS.includes(e.lasts) ? { lasts: e.lasts } : {}) }))
         options.push({ key: o.key, label: text(o.label, 160), p: o.p, signpost: text(o.signpost, 240) || null, effects })
     }
     if (new Set(options.map(o => o.key)).size !== options.length) return bad(`"${question.slice(0, 40)}": option keys must be distinct`)
