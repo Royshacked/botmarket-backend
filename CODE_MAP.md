@@ -1267,7 +1267,7 @@ services/
   situation/sectorState.js  buildSectorState: the macro BACKDROP and the sector's PRICES by code + its news → ONE Opus call
                             (prompts/situation_sector_state.md, effort medium): its news, policy, calendar, 1–6 questions.
   situation/layers.js       buildSectorStates / buildSectorLayer (each sector's state → its network at the sector cap → ONE
-                            linksFor call over every live node; a failed sector is a gap), holdCaps / capOut (macro 20, each
+                            linksFor call over every live node; a failed sector is a gap), holdCaps / capOut / capDrop (rank = impact × uncertainty × reach; macro 30, 2 places kept per core story, at most 6 a story — situation-network-horizons.md §2; each
                             sector 3, all sectors 30; children go with parents), promote (a sector question reaching 3+
                             sectors moves to macro, keeping its `origin`), anchorLinks (a new link counts from now),
                             withMacroScores (questions BORN macro only; forecasts are graded by origin too).
@@ -1320,7 +1320,7 @@ services/
                             (prompts/situation_update.md) → a LOGGED decision per news item (moves_option / new_option /
                             new_question / resolves / outside / none), signposts fired, due questions → applyAnswer (live
                             nodes only; empty signposts / evidence said), new branches mapped (names kept), new questions
-                            LINKED (network.linksFor), overCap + withDescendants (20 open), re-anchor + propagate, re-score,
+                            LINKED (network.linksFor), capOut (layers.js, the caps per layer), re-anchor + propagate, re-score,
                             early warnings (woken branches, beside the scores), reviewItems (moved > 10 / drift since review
                             / new / woken / resolved; silence = accept resets the baseline); a weekly REFRESHES the code's
                             data sections (refreshSections); the head must not have moved before the save; forecasts graded

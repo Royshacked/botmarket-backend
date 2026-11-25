@@ -6,7 +6,7 @@
 //   · combines the runs: the MEDIAN of each option, renormalised; a given / duplicate / link kept when most runs agree;
 //     confidence low when the runs spread by more than SPREAD_LOW;
 //   · ranks: impact × uncertainty (the normalised entropy of the numbers); low impact and duplicates are dropped; the
-//     OPEN nodes past the cap of 20 are dropped as `cap`; settled nodes stay outside the cap; a node under a dropped
+//     OPEN nodes past the cap are dropped as `cap`; settled nodes stay outside the cap; a node under a dropped
 //     branch goes with it;
 //   · anchors every node (propagate.anchorFor) and logs every probability as a forecast.
 // The result is a bundle store.saveRun takes whole.
@@ -28,7 +28,13 @@ const _system = makePromptLoader(join(__dirname, '../../prompts/situation_networ
 export const NETWORK_MODEL = 'claude-opus-5-5'
 export const NETWORK_EFFORT = 'high'
 export const RUNS = 3
-export const OPEN_CAP = 20
+/** Open macro questions kept (situation-network-horizons.md §2; 20 until 2026-11-25). */
+export const OPEN_CAP = 30
+/**
+ * A BUILD keeps this many times the cap here: the real cap (layers.holdCaps) ranks by reach too, and reach is known only
+ * once the questions are mapped to industries.
+ */
+export const BUILD_SLACK = 1.5
 /**
  * Runs that disagree by more than this on any option mark the node's confidence low; so does a majority of runs saying
  * low. (0.15 and "any run low" marked 22 of 24 low on the first live build, 2026-11-23: three runs on three options

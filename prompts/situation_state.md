@@ -37,7 +37,9 @@ THE SECTIONS YOU WRITE
     an outsider and the old CEO back: two options). A separate review attacks the options after you;
   - its `tree`: the starting move it belongs to. Use these where they fit, and name a new one only when none does:
     `tariffs_trade`, `inflation_fed_rates`, `ai_buildout`, `geopolitics`, `trust_in_us`, `china_japan`,
-    `energy`, `growth_jobs`;
+    `energy`, `growth_jobs` (all AI spending, chips and data centres are `ai_buildout`; the Fed, inflation and
+    yields `inflation_fed_rates`; oil and gas `energy`). One story has ONE name: the network limits how many questions a
+    story holds;
   - `impact`: how much its answer would change which US industries win or lose (low / medium / high);
   - `uncertainty`: how open it is (low: one option is far ahead; high: no option dominates);
   - `why`: one sentence on what rides on it.

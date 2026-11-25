@@ -9,10 +9,10 @@
 // the record only) are logged against the previous complete run.
 
 import { buildState } from './state.js'
-import { buildNetwork } from './network.js'
+import { buildNetwork, OPEN_CAP, BUILD_SLACK } from './network.js'
 import { buildExposures } from './exposure.js'
 import { mapBranches, scoreIndustries, wouldBeEntries } from './industries.js'
-import { buildSectorLayer, promote, capOut, anchorLinks, withMacroScores } from './layers.js'
+import { buildSectorLayer, promote, capOut, capDrop, anchorLinks, withMacroScores } from './layers.js'
 import { buildDataSections } from './state.data.js'
 import { MACRO, layerOf, originOf } from './sectors.js'
 import { saveRun, latestRun, readRun } from './store.js'
@@ -56,7 +56,7 @@ export async function mapByLayer(nodes, industries, map = _io.mapBranches) {
  */
 export function settle({ nodes, links, forecasts, dropped, asOf }) {
     const pr = promote(nodes)
-    const out = new Set(capOut(pr.nodes))
+    const out = capOut(pr.nodes)
     const kept = pr.nodes.filter(n => !out.has(n.node_id))
     const ids = new Set(kept.map(n => n.node_id))
     const keptLinks = links.filter(l => ids.has(l.from.node_id) && ids.has(l.to.node_id))
@@ -64,7 +64,7 @@ export function settle({ nodes, links, forecasts, dropped, asOf }) {
     // A forecast is graded by its question's ORIGIN (a promoted question stays the sector layer's work).
     const origin = new Map(kept.map(n => [n.node_id, originOf(n)]))
     const fc = forecasts.filter(f => ids.has(f.node_id)).map(f => ({ ...f, layer: origin.get(f.node_id) }))
-    const capped = pr.nodes.filter(n => out.has(n.node_id)).map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer on ${asOf}`, flagged: true, layer: layerOf(n) }))
+    const capped = pr.nodes.filter(n => out.has(n.node_id)).map(n => capDrop(n, out.get(n.node_id), asOf))
     const live = anchored.filter(n => n.status === 'live')
     const list = [...dropped, ...capped]
     const open = live.filter(n => n.kind === 'open').length, settledN = live.filter(n => n.kind === 'settled').length
@@ -87,7 +87,7 @@ export async function buildFull({ asOf = new Date().toISOString().slice(0, 10), 
         const st = await _io.buildState(asOf)
         cost.state = st.cost_usd ?? 0
         if (!st.ok) return { ok: false, stage: 'state', reason: st.reason, cost_usd: total() }
-        const net = await _io.buildNetwork(st.state, st.questions)
+        const net = await _io.buildNetwork(st.state, st.questions, { cap: Math.ceil(OPEN_CAP * BUILD_SLACK) })
         cost.network = net.cost_usd ?? 0
         if (!net.ok) return { ok: false, stage: 'network', reason: net.reason, cost_usd: total() }
         // The sector layer under it (situation-network-layers.md).

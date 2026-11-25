@@ -43,8 +43,8 @@ test('fitProbabilities fits a list to the keys and renormalises; nothing positiv
 
 test('holdCaps (the macro layer) drops the lowest impact × uncertainty open nodes; settled ones never count', () => {
     const ns = [node('a', { x: 0.5, y: 0.5 }), node('b', { x: 0.7, y: 0.3 }, { impact: 'low' }), node('c', { x: 0.9, y: 0.1 }, { kind: 'settled' })]
-    assert.deepEqual(holdCaps(ns, { macro: 1 }), ['b'])
-    assert.deepEqual(holdCaps(ns, { macro: 5 }), [])
+    assert.deepEqual([...holdCaps(ns, { macro: 1 }).keys()], ['b'])
+    assert.equal(holdCaps(ns, { macro: 5 }).size, 0)
 })
 
 test('reviewItems: a move over 10 points; drift since the last review; new, woken and resolved', () => {

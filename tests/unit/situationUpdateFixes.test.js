@@ -117,6 +117,18 @@ test('runUpdate: if the network moved while it ran (an override), nothing is sav
     assert.deepEqual(rec.order, [])
 })
 
+test('runUpdate: a failed mapping still saves, and its new question ranks at a reach of 1, not at the bottom', async () => {
+    const rec = { order: [] }
+    const full = Array.from({ length: 30 }, (_, i) => node(`o${i}`, { a: 0.5, b: 0.5 }, { tree: `t${i}` }))
+    _setIO({ ...base(rec), map: async () => ({ ok: false, reason: 'no mapping run answered', cost_usd: 0.1 }), links: async () => ({ ok: true, links: [], cost_usd: 0 }),
+        read: async () => ({ run: { run_id: 'run_1' }, state: null, nodes: full, links: [], dropped: { considered: 30, open: 30, settled: 0, dropped: [] }, industries: [] }),
+        call: async () => ({ data: { events: [ev({ decision: 'new_question', new_question: newQuestion({ tree: 'minerals' }) })], signposts_fired: [], due: [] } }) })
+    const r = await runUpdate({ kind: 'event', trigger: 'x', asOf: '2025-02-04' })
+    assert.equal(r.ok, true, r.reason)
+    assert.ok(rec.saved.nodes.some(n => n.question === 'Minerals?'), 'kept over a mapped question with no reach')
+    assert.equal(rec.saved.dropped.dropped.filter(d => d.reason === 'cap').length, 1)
+})
+
 test('runUpdate: the cap drops a node AND its children, and the run still saves', async () => {
     const rec = { order: [] }
     const many = Array.from({ length: 20 }, (_, i) => node(`o${i}`, { a: 0.5, b: 0.5 }, { impact: 'high' }))

@@ -6,7 +6,7 @@
 //   1. applies the decisions — a moved node gets its new numbers and a new ANCHOR; a new option or question is mapped
 //      to industries (only those branches); a resolution is 100% on its option, its forecasts graded;
 //   2. wakes the dormant branches whose signposts fired: an EARLY WARNING beside the scores, never inside (§11.9);
-//   3. holds the cap: the open nodes over 20 lose the lowest-ranked, moved to the dropped list and flagged;
+//   3. holds the caps (layers.holdCaps): the lowest-ranked open nodes over them move to the dropped list, flagged;
 //   4. spreads until settled (propagate.js) and re-scores the industries over every path;
 //   5. lists what goes on Roy's review card (§11.1 + the drift rule) and the would-be entries;
 //   6. saves the run whole.
@@ -24,7 +24,7 @@ import { buildExposures } from './exposure.js'
 import { mapBranches, scoreIndustries, wouldBeEntries } from './industries.js'
 import { effectsFromNodes } from './build.js'
 import { NO_SIGNPOST, linksFor } from './network.js'
-import { capOut, promote, anchorLinks, withMacroScores } from './layers.js'
+import { capOut, capDrop, promote, anchorLinks, withMacroScores } from './layers.js'
 import { mapByLayer } from './build.js'
 import { macroBackdrop, sectorPriceItems, rewriteSectorState } from './sectorState.js'
 import { rewriteState } from './state.js'
@@ -437,19 +437,21 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         // exposures are keyed by basket (`level:code`), as build.js keys them.
         const basketNames = new Map((prev.industries ?? []).map(r => [`${r.level}:${r.code}`, r.name]))
         let exp = null
+        const unmapped = new Set()   // their mapping failed: no reach to rank by
         if (applied.needMap.size) {
             exp = await _io.exposures(basketNames)
             const m = await mapByLayer(nodes.filter(n => applied.needMap.has(n.node_id)), exp.industries, _io.map)
             cost += m.cost_usd ?? 0
             if (m.ok) nodes = nodes.map(n => (applied.needMap.has(n.node_id) ? { ...n, options: n.options.map(o => ({ ...o, effects: m.effects.get(`${n.node_id}|${o.key}`) ?? o.effects ?? [] })) } : n))
+            else for (const n of nodes) if (applied.needMap.has(n.node_id) && !n.options.some(o => o.effects?.length)) unmapped.add(n.node_id)
         }
         // Promotion (a sector question reaching many sectors moves up), then the caps per layer — every node hanging under a
         // dropped one goes with it.
         const pr = promote(nodes)
         nodes = pr.nodes
-        const out = capOut(nodes)
-        const capDrops = out.map(id => nodes.find(n => n.node_id === id)).filter(Boolean)
-        nodes = nodes.map(n => (out.includes(n.node_id) ? { ...n, status: 'dropped' } : n))
+        const out = capOut(nodes, { unmapped })
+        const capDrops = nodes.filter(n => out.has(n.node_id)).map(n => capDrop(n, out.get(n.node_id), asOf))
+        nodes = nodes.map(n => (out.has(n.node_id) ? { ...n, status: 'dropped' } : n))
         // Links: the ones still between two kept nodes, plus new ones for the questions this update added.
         const keptIds = new Set(nodes.filter(n => n.status !== 'dropped').map(n => n.node_id))
         let links = (prev.links ?? []).filter(l => keptIds.has(l.from.node_id) && keptIds.has(l.to.node_id))
@@ -494,7 +496,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
             considered: 0,   // set below, once the parts are counted
             open: liveNow.filter(n => n.kind === 'open').length, settled: liveNow.filter(n => n.kind === 'settled').length,
             resolved: nodes.filter(n => n.status === 'resolved').length,
-            dropped: [...prevDropped, ...outcomes.dropped, ...orphanDrops, ...capDrops.map(n => ({ question: n.question, options: n.options.map(o => o.label), reason: 'cap', note: `moved out by the cap of its layer (${layerName(layerOf(n))}) on ${asOf}`, flagged: true, layer: layerOf(n) }))],
+            dropped: [...prevDropped, ...outcomes.dropped, ...orphanDrops, ...capDrops],
         }
         dropped.considered = dropped.open + dropped.settled + dropped.resolved + dropped.dropped.length
         // Silence = accept (§11.1): what the card shows becomes Roy's new baseline for the drift rule.

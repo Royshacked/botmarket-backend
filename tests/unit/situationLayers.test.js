@@ -4,7 +4,7 @@ import assert from 'node:assert/strict'
 import { sectorOf, isLayer, layerOf, layerName, SECTORS, SECTOR_CAP, SECTORS_TOTAL_CAP } from '../../services/situation/sectors.js'
 import { checkNode, checkSectorState, checkForecast, checkIndustry, checkDropped } from '../../services/situation/model.js'
 import { checkBundle } from '../../services/situation/store.js'
-import { holdCaps, capOut, promote, anchorLinks, withMacroScores, buildSectorLayer, _setIO as setLayersIO } from '../../services/situation/layers.js'
+import { holdCaps, capOut, capDrop, reachFactor, rankOf, CORE_TREES, CORE_PLACES, PER_TREE, promote, anchorLinks, withMacroScores, buildSectorLayer, _setIO as setLayersIO } from '../../services/situation/layers.js'
 import { settle, mapByLayer, buildSectors, buildFull, _setIO as setBuildIO } from '../../services/situation/build.js'
 import { macroBackdrop, sectorPriceItems, sectorSchema, sectorPrompt, buildSectorState, _setIO as setSectorIO } from '../../services/situation/sectorState.js'
 import { fetchSectorNews, _setIO as setNewsIO } from '../../services/situation/news.js'
@@ -61,23 +61,65 @@ test('checkSectorState: a sector code, every section, nothing after its date; th
 
 // ── the layer rules ──
 
-test('holdCaps: per layer — macro 20, each sector 3, every sector together 30; settled nodes never count', () => {
-    const macro = Array.from({ length: 22 }, (_, i) => node(`m${i}`, { a: 0.5 + i * 0.01, b: 0.5 - i * 0.01 }))
+test('holdCaps: per layer — macro 30, each sector 3, every sector together 30; settled nodes never count', () => {
+    const macro = Array.from({ length: 32 }, (_, i) => node(`m${i}`, { a: 0.5 + i * 0.01, b: 0.5 - i * 0.01 }, { tree: `t${i}` }))
     const health = Array.from({ length: 5 }, (_, i) => node(`h${i}`, { a: 0.5 + i * 0.05, b: 0.5 - i * 0.05 }, { layer: '35' }))
     const settledOne = node('s', { a: 0.9, b: 0.1 }, { kind: 'settled', layer: '35' })
-    const out = holdCaps([...macro, ...health, settledOne])
-    assert.deepEqual(out.filter(id => id.startsWith('m')).sort(), ['m20', 'm21'], 'the two least uncertain macro nodes')
+    const out = [...holdCaps([...macro, ...health, settledOne]).keys()]
+    assert.deepEqual(out.filter(id => id.startsWith('m')).sort(), ['m30', 'm31'], 'the two least uncertain macro nodes')
     assert.deepEqual(out.filter(id => id.startsWith('h')).sort(), ['h3', 'h4'])
     assert.ok(!out.includes('s'))
     // Eleven sectors of three: 33 > 30, so the three lowest across sectors go too.
     const many = SECTORS.flatMap((s, k) => [0, 1, 2].map(i => node(`${s.code}_${i}`, { a: 0.5 + (k * 3 + i) * 0.004, b: 0.5 - (k * 3 + i) * 0.004 }, { layer: s.code })))
-    assert.equal(holdCaps(many).length, SECTORS.length * SECTOR_CAP - SECTORS_TOTAL_CAP)
+    assert.equal(holdCaps(many).size, SECTORS.length * SECTOR_CAP - SECTORS_TOTAL_CAP)
 })
 
 test('capOut takes the children of a node moved out with it', () => {
     const ns = [node('p', { a: 0.99, b: 0.01 }, { layer: '35' }), node('c', { x: 0.5, y: 0.5 }, { layer: '35', given: { node_id: 'p', option: 'a' }, kind: 'settled' }),
         ...[1, 2, 3].map(i => node(`k${i}`, { a: 0.5, b: 0.5 }, { layer: '35' }))]
-    assert.deepEqual(capOut(ns).sort(), ['c', 'p'])
+    assert.deepEqual([...capOut(ns).keys()].sort(), ['c', 'p'])
+    assert.equal(capOut(ns).get('c'), 'cap')
+})
+
+const reaching = (id, k, over = {}) => { const n = node(id, { a: 0.5, b: 0.5 }, over); n.options[0].effects = Array.from({ length: k }, (_, i) => ({ code: `c${i}`, direction: 'up', bucket: 'small' })); return n }
+
+test('reach: 0.5 at none or one industry, 1.5 at ten or more, even between; a failed mapping ranks at 1', () => {
+    assert.equal(reachFactor(reaching('x', 0)), 0.5)
+    assert.equal(reachFactor(reaching('x', 1)), 0.5)
+    assert.ok(Math.abs(reachFactor(reaching('x', 4)) - (0.5 + 3 / 9)) < 1e-9)
+    assert.equal(reachFactor(reaching('x', 10)), 1.5)
+    assert.equal(reachFactor(reaching('x', 40)), 1.5)
+    assert.equal(rankOf(reaching('x', 15)), 3 * rankOf(reaching('y', 1)))
+    assert.equal(rankOf(reaching('x', 0), new Set(['x'])), 3)
+})
+
+test('holdCaps: a likely core question keeps its place over wider coin-flips; only CORE_PLACES per story are kept for it', () => {
+    const others = Array.from({ length: 6 }, (_, i) => reaching(`o${i}`, 15, { tree: `t${i}` }))
+    const fed = [0.6, 0.7, 0.75].map((p, i) => node(`fed${i}`, { a: p, b: 1 - p }, { tree: CORE_TREES[0] }))
+    const out = holdCaps([...others, ...fed], { macro: 5 })
+    assert.equal(out.size, 4)
+    assert.ok(!out.has('fed0') && !out.has('fed1') && out.get('fed2') === 'cap')
+    assert.equal(CORE_PLACES, 2)
+    // A core story with nothing gives its places back.
+    assert.equal(holdCaps(others, { macro: 5 }).size, 1)
+})
+
+test('holdCaps: one story holds at most PER_TREE macro questions; "other" is no story; sectors are not limited by story', () => {
+    const ai = Array.from({ length: PER_TREE + 2 }, (_, i) => node(`ai${i}`, { a: 0.5 + i * 0.01, b: 0.5 - i * 0.01 }, { tree: 'ai_buildout' }))
+    const out = holdCaps(ai)
+    assert.deepEqual([...out], [[`ai${PER_TREE}`, 'story_full'], [`ai${PER_TREE + 1}`, 'story_full']])
+    assert.equal(holdCaps(ai.map(n => ({ ...n, tree: 'other' }))).size, 0)
+    const d = capDrop(ai[PER_TREE], 'story_full', '2025-01-07')
+    assert.ok(d.note.includes('ai_buildout') && d.flagged)
+    assert.equal(checkDropped({ considered: 1, open: 0, settled: 0, dropped: [d] }).ok, true)
+})
+
+test('holdCaps is stable: the kept set held again moves nothing out', () => {
+    const all = [...CORE_TREES.flatMap(t => [0, 1, 2, 3, 4, 5, 6].map(i => reaching(`${t}${i}`, i, { tree: t }))), ...Array.from({ length: 20 }, (_, i) => reaching(`x${i}`, i, { tree: `x${i}` }))]
+    const out = holdCaps(all)
+    const kept = all.filter(n => !out.has(n.node_id))
+    assert.equal(kept.length, 30)
+    assert.equal(holdCaps(kept).size, 0)
 })
 
 test('promote: a sector question reaching industries in 3+ sectors moves to the macro layer; fewer stays', () => {

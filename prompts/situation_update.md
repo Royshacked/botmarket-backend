@@ -13,6 +13,11 @@ as-of date.
    - `new_question`: it opens a question the network does not have (with its options, tree, impact, uncertainty,
      probabilities, a signpost per option, resolve-by date and lag). Ask: is this a new DIMENSION (how fast vs how
      broad), or just news about an old one?
+     Its `tree` is the STORY it belongs to, and the network limits how many questions one story holds, so one story has
+     one name: use an existing question's tree or one of `tariffs_trade`, `inflation_fed_rates`, `ai_buildout`, `geopolitics`, `trust_in_us`, `china_japan`,
+     `energy`, `growth_jobs`
+     (all AI spending, chips and data centres are `ai_buildout`; the Fed, inflation and yields `inflation_fed_rates`; oil and gas
+     `energy`). Name a new tree only when none fits.
    - `resolves`: it settles a question. Name the option that happened and the evidence. Each option shows what it
      ASSUMES (its industry effects); a separate check then asks whether what happened matches them, so make the
      evidence say what actually happened (who, what), not just the option's label.

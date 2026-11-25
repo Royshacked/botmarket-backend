@@ -23,7 +23,7 @@ export const NODE_STATUSES = Object.freeze(['live', 'resolved', 'dropped', 'spli
 export const SET_BY = Object.freeze(['llm', 'roy'])
 export const CONFIDENCE = Object.freeze(['low', 'high'])
 export const BUCKETS = Object.freeze(['small', 'medium', 'large'])
-export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'reworded', 'parent_resolved'])
+export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'story_full', 'reworded', 'parent_resolved'])
 export const EVENT_DECISIONS = Object.freeze(['moves_option', 'new_option', 'new_question', 'resolves', 'outside'])
 
 /** A settled node has one option at or above this; below it the node is open (§3: "one option dominates"). */

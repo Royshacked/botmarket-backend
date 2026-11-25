@@ -24,7 +24,7 @@ export const SECTORS = Object.freeze([
 ])
 export const SECTOR_CODES = Object.freeze(SECTORS.map(s => s.code))
 export const MACRO = 'macro'
-/** Open questions per sector, and across every sector (§13 defaults). The macro layer keeps its own 20. */
+/** Open questions per sector, and across every sector (§13 defaults). The macro layer keeps its own (network.OPEN_CAP). */
 export const SECTOR_CAP = 3
 export const SECTORS_TOTAL_CAP = 30
 /** A sector question whose branches move industries in this many sectors or more moves up to the macro layer (§5.1). */

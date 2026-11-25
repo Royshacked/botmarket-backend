@@ -5,16 +5,17 @@
 // (network.linksFor). A sector that fails is a named gap, never the whole run.
 //
 // And the pure rules both layers share, used by the build, the sector run and the update:
-//   · holdCaps      — the cap PER LAYER: macro 20; each sector 3; every sector together 30 (lowest-ranked out first);
+//   · holdCaps      — the cap PER LAYER: macro 30, with places kept for the core stories and a limit per story; each
+//                     sector 3; every sector together 30 (lowest-ranked out first; situation-network-horizons.md §2);
 //   · promote       — a sector question whose branches move industries in PROMOTE_AT+ sectors moves to the macro layer;
 //   · anchorLinks   — a link added to a node with an anchor counts from NOW (else it would wait for the next anchor);
 //   · macroOnly     — the industries scored over the macro branches alone, kept beside the full score (§6).
 
 import { buildSectorState } from './sectorState.js'
-import { buildNetwork, linksFor, uncertainty, IMPACT_WEIGHT, OPEN_CAP } from './network.js'
+import { buildNetwork, linksFor, uncertainty, IMPACT_WEIGHT, OPEN_CAP, BUILD_SLACK } from './network.js'
 import { marginal } from './propagate.js'
 import { scoreIndustries } from './industries.js'
-import { SECTORS, SECTOR_CAP, SECTORS_TOTAL_CAP, PROMOTE_AT, MACRO, layerOf, originOf, sectorOf, topNames } from './sectors.js'
+import { SECTORS, SECTOR_CAP, SECTORS_TOTAL_CAP, PROMOTE_AT, MACRO, layerOf, originOf, sectorOf, layerName, topNames } from './sectors.js'
 import { logger } from '../logger.service.js'
 
 const LOG = '[situation.layers]'
@@ -24,25 +25,62 @@ export const SECTOR_CONCURRENCY = 3
 const _io = { state: buildSectorState, network: buildNetwork, links: linksFor, names: () => topNames() }
 export function _setIO(io) { Object.assign(_io, io) }
 
-const rank = (n) => IMPACT_WEIGHT[n.impact ?? 'medium'] * uncertainty(n.options.map(o => o.p))
+/** The stories always heard: the best CORE_PLACES open questions of each hold a macro place before the rest compete. */
+export const CORE_TREES = Object.freeze(['inflation_fed_rates', 'growth_jobs', 'energy', 'tariffs_trade', 'geopolitics'])
+export const CORE_PLACES = 2
+/** At most this many open macro questions on one story (tree): the scores add up, so a story asked ten times counts ten times. */
+export const PER_TREE = 6
+/** The tree of a question that named none: not a story, so never limited. */
+const NO_TREE = 'other'
+/** Reach: how many industries the branches move, as a factor — REACH_MIN at one or none, REACH_MAX at REACH_FULL or more. */
+export const REACH_MIN = 0.5
+export const REACH_MAX = 1.5
+export const REACH_FULL = 10
+
+/** A question's reach factor from its mapped effects. Pure. */
+export function reachFactor(node) {
+    const n = new Set(node.options.flatMap(o => (o.effects ?? []).map(e => e.code))).size
+    return REACH_MIN + (REACH_MAX - REACH_MIN) * Math.min(1, Math.max(0, n - 1) / (REACH_FULL - 1))
+}
+
+/** Impact × uncertainty × reach; a question not mapped yet (`unmapped`: its mapping failed) has a reach of 1. Pure. */
+export function rankOf(node, unmapped = new Set()) {
+    return IMPACT_WEIGHT[node.impact ?? 'medium'] * uncertainty(node.options.map(o => o.p)) * (unmapped.has(node.node_id) ? 1 : reachFactor(node))
+}
+
+/** The macro places: the core stories' best first, then by rank, at most PER_TREE a story → `Map(id → reason)` moved out. Pure. */
+function macroOut(sorted, cap) {
+    const core = new Set(CORE_TREES.flatMap(t => sorted.filter(n => n.tree === t).slice(0, CORE_PLACES)))
+    const kept = new Set(), perTree = new Map(), out = new Map()
+    for (const n of [...sorted.filter(x => core.has(x)), ...sorted.filter(x => !core.has(x))]) {
+        const used = perTree.get(n.tree) ?? 0
+        if (n.tree !== NO_TREE && used >= PER_TREE) { out.set(n.node_id, 'story_full'); continue }
+        if (kept.size >= cap) { out.set(n.node_id, 'cap'); continue }
+        kept.add(n.node_id)
+        perTree.set(n.tree, used + 1)
+    }
+    return out
+}
 
 /**
- * The cap per layer → the node ids moved out, lowest-ranked first in each layer: macro over OPEN_CAP; each sector over
- * SECTOR_CAP; then every sector together over SECTORS_TOTAL_CAP. Only LIVE, OPEN nodes count. Pure.
+ * The cap per layer → `Map(node id → 'cap' | 'story_full')` of those moved out, lowest-ranked first in each layer: macro
+ * over OPEN_CAP (macroOut); each sector over SECTOR_CAP; then every sector together over SECTORS_TOTAL_CAP. Only LIVE,
+ * OPEN nodes count. Pure.
  */
-export function holdCaps(nodes, { macro = OPEN_CAP, sector = SECTOR_CAP, total = SECTORS_TOTAL_CAP } = {}) {
+export function holdCaps(nodes, { macro = OPEN_CAP, sector = SECTOR_CAP, total = SECTORS_TOTAL_CAP, unmapped = new Set() } = {}) {
     const open = nodes.filter(n => n.status === 'live' && n.kind === 'open')
-    const out = []
+    const rank = (n) => rankOf(n, unmapped)
+    const out = new Map()
     const byLayer = new Map()
     for (const n of open) { const l = layerOf(n); if (!byLayer.has(l)) byLayer.set(l, []); byLayer.get(l).push(n) }
     const kept = []
     for (const [l, ns] of byLayer) {
         const sorted = [...ns].sort((a, b) => rank(b) - rank(a))
-        const cap = l === MACRO ? macro : sector
-        out.push(...sorted.slice(cap).map(n => n.node_id))
-        if (l !== MACRO) kept.push(...sorted.slice(0, cap))
+        if (l === MACRO) { for (const [id, reason] of macroOut(sorted, macro)) out.set(id, reason); continue }
+        for (const n of sorted.slice(sector)) out.set(n.node_id, 'cap')
+        kept.push(...sorted.slice(0, sector))
     }
-    out.push(...kept.sort((a, b) => rank(b) - rank(a)).slice(total).map(n => n.node_id))
+    for (const n of kept.sort((a, b) => rank(b) - rank(a)).slice(total)) out.set(n.node_id, 'cap')
     return out
 }
 
@@ -60,9 +98,17 @@ export function withDescendants(nodes, ids) {
     return [...out]
 }
 
-/** The cap per layer, and every node hanging under one moved out with it. Pure. */
+/** The cap per layer, and every node hanging under one moved out with it → `Map(node id → reason)`. Pure. */
 export function capOut(nodes, caps) {
-    return withDescendants(nodes, holdCaps(nodes, caps))
+    const held = holdCaps(nodes, caps)
+    return new Map(withDescendants(nodes, held.keys()).map(id => [id, held.get(id) ?? 'cap']))
+}
+
+/** A question moved out by the caps, as the dropped list keeps it. Pure. */
+export function capDrop(node, reason, asOf) {
+    const layer = layerOf(node)
+    const note = reason === 'story_full' ? `its story (${node.tree}) already has ${PER_TREE} open questions on ${asOf}` : `moved out by the cap of its layer (${layerName(layer)}) on ${asOf}`
+    return { question: node.question, options: node.options.map(o => o.label), reason, note, flagged: true, layer }
 }
 
 /** The sectors a node's branches reach through their mapped effects. Pure. */
@@ -151,7 +197,7 @@ export async function buildSectorLayer({ asOf, state, rows = [], existing = [], 
     const gaps = [...states.gaps], failed = [...states.failed]
     const built = await inBatches(states.sectors, SECTOR_CONCURRENCY, async ({ sector, state: st }) => {
         if (!st.questions.length) return { sector, state: st.state, net: { nodes: [], links: [], dropped: { considered: 0, dropped: [] }, forecasts: [] } }
-        const net = await _io.network(st.state, st.questions, { cap: SECTOR_CAP, layer: sector.code, title: `SECTOR: ${sector.name} (GICS ${sector.code}). Its questions only; the macro layer is linked later.` })
+        const net = await _io.network(st.state, st.questions, { cap: Math.ceil(SECTOR_CAP * BUILD_SLACK), layer: sector.code, title: `SECTOR: ${sector.name} (GICS ${sector.code}). Its questions only; the macro layer is linked later.` })
         cost += net.cost_usd ?? 0
         if (!net.ok) { failed.push({ sector: sector.code, stage: 'network', reason: net.reason }); return { sector, state: st.state, net: null } }
         return { sector, state: st.state, net }
