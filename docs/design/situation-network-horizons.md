@@ -1,6 +1,6 @@
 # The situation network: horizons and the cap (2026-11-25)
 
-Status: steps 1–2 (§2–3) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
+Status: steps 1–3 (§2–4) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
 [situation-network-layers.md](situation-network-layers.md), [situation-network-outcomes.md](situation-network-outcomes.md).
 To land BEFORE the forward test starts: every step changes what is being tested.
 
@@ -66,10 +66,9 @@ Two fields on each effect, in the MAPPING call's schema (the update schema is at
 ## 4. Two scores (`industries.scoreIndustries`)
 
 - The same samples, two sums per industry: **near** (0–183 days from the run) and **far** (184–730 days). An effect
-  counts in a window when its active period overlaps it by at least 30 days.
-- The size in a window is the effect's bucket, not scaled by the overlap. Whether to scale is a later measurement.
-- Each row keeps `near` and `far`: p_win, p_lose, size, agreement, paths. The existing top-level fields stay and hold
-  NEAR, so the board, the entries and the old runs keep reading. `macro` is kept for both.
+  counts ONCE, in the window it STARTS in (Roy, 2026-11-25): counted by overlap, 140 of a build's 216 effects sat in both.
+  One already started is near until it ends; one starting past day 730 counts in neither.
+- Each row's own fields (p_win, p_lose, size, agreement, paths) hold NEAR; `far` holds the same for far, so the board, the entries and the old runs keep reading. `macro` is kept for both.
 - Axl says which window a call is for; the Industries tab shows a Near / Far switch, Near first.
 
 ## 5. Grading (`scorecard.js`, `control.js`)
@@ -101,7 +100,7 @@ re-mapping plus a rebuild to fill the new places. To be measured on dev before p
 
 1. Ranking, reserved places, the per-tree limit, macro 30 (§2).
 2. `starts` / `lasts`, agreement, expiry (§3). Probe the mapping schema live before building on it.
-3. Near and far scores, the board, Axl's tool (§4).
+3. BUILT: near and far scores, the board, Axl's tool (§4).
 4. Grading and the control (§5).
 5. Long questions (§6).
 6. Dev: re-map, rebuild, two weekly runs, cost measured. Then prod is aligned again, then the forward test.

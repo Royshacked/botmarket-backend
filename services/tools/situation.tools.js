@@ -27,15 +27,18 @@ const opts = (n) => n.options.map(o => `${o.label} ${pct(o.p)}${o.dormant ? ' (d
 /** A sector question names its sector (situation-network-layers.md §2). */
 const where = (n) => (layerOf(n) === MACRO ? '' : `[${layerName(layerOf(n))}] `)
 
+const callsIn = (rows) => rows.filter(r => r.p_win >= 0.6 || r.p_lose >= 0.6).map(r => `${r.name} ${r.p_win >= 0.6 ? `wins ${pct(r.p_win)}` : `loses ${pct(r.p_lose)}`}`).join('; ') || 'none — no industry is that one-sided'
+
 /** The summary view. Pure. */
 export function formatSummary(run) {
     const live = run.nodes.filter(n => n.status === 'live')
-    const calls = run.industries.filter(r => r.p_win >= 0.6 || r.p_lose >= 0.6)
+    const far = run.industries.filter(r => r.far).map(r => ({ name: r.name, ...r.far }))
     const warn = run.run.stats?.woken ?? []
     const dec = (run.run.stats?.decisions ?? []).filter(d => d.applied && d.decision !== 'none').slice(0, 8)
     return [
         `SITUATION NETWORK — ${run.run.kind} run of ${run.run.as_of}${run.run.trigger ? ` (${run.run.trigger})` : ''}. A forward test, untested.`,
-        `INDUSTRY CALLS (≥ 60% over every path): ${calls.length ? calls.map(r => `${r.name} ${r.p_win >= 0.6 ? `wins ${pct(r.p_win)}` : `loses ${pct(r.p_lose)}`}`).join('; ') : 'none — no industry is that one-sided'}`,
+        `INDUSTRY CALLS, NEAR — 0–6 months (≥ 60% over every path): ${callsIn(run.industries)}`,
+        far.length ? `INDUSTRY CALLS, FAR — effects that start 6–24 months out (≥ 60%): ${callsIn(far)}` : null,
         warn.length ? `EARLY WARNINGS (a dormant branch woke; shown beside the scores, not in them): ${warn.map(w => `${w.question} → ${w.label} (${pct(w.p)})`).join('; ')}` : null,
         `OPEN QUESTIONS (${live.filter(n => n.kind === 'open').length}):`,
         ...live.filter(n => n.kind === 'open').map(n => `- ${where(n)}${n.question} — ${opts(n)}`),
@@ -55,11 +58,12 @@ export function formatIndustry(run, name) {
     const why = (p) => nodes.get(p.node_id)?.options.find(o => o.key === p.option)?.effects?.find(e => e.code === r.code)?.why ?? null
     const resolveBy = (p) => p.resolve_by ?? nodes.get(p.node_id)?.resolve_by ?? null
     return [
-        `${r.name} (${run.run.as_of}): wins ${pct(r.p_win)}, loses ${pct(r.p_lose)} over every path; size ${r.bucket} (how big the average push on it is — the mapped effects added up over every path; not a position size); ${r.agreement != null ? `${pct(r.agreement)} of the paths that move it agree` : 'no path moves it'}.`,
-        'HORIZON: there is no single one — each branch below is decided by the resolve-by date of its question; the forward test grades the calls at 3 and 6 months.',
+        `${r.name} (${run.run.as_of}): NEAR (0–6 months) wins ${pct(r.p_win)}, loses ${pct(r.p_lose)} over every path; size ${r.bucket} (how big the average push on it is — the mapped effects added up over every path; not a position size); ${r.agreement != null ? `${pct(r.agreement)} of the paths that move it agree` : 'no path moves it'}.`,
+        r.far?.paths?.length ? `FAR (effects that start 6–24 months out): wins ${pct(r.far.p_win)}, loses ${pct(r.far.p_lose)}; size ${r.far.bucket ?? 'n/a'}.` : null,
+        'HORIZON: an effect counts in the window it starts in. Near is the score the forward test is judged on (graded at 3 and 6 months); each branch is decided by the resolve-by date of its question. Say which window a number is for.',
         r.macro ? `The macro layer alone: wins ${pct(r.macro.p_win)}, loses ${pct(r.macro.p_lose)} (the rest is the sector layer).` : null,
         'BEHIND IT (the branches that move it most):',
-        ...r.paths.map(p => `- "${p.question}"${resolveBy(p) ? ` (resolves by ${resolveBy(p)})` : ''} → ${p.label}: ${p.weight >= 0 ? 'helps' : 'hurts'}${why(p) ? ` — ${why(p)}` : ''}`),
+        ...[...r.paths, ...(r.far?.paths ?? []).map(p => ({ ...p, far: true }))].map(p => `- ${p.far ? '[far] ' : ''}"${p.question}"${resolveBy(p) ? ` (resolves by ${resolveBy(p)})` : ''} → ${p.label}: ${p.weight >= 0 ? 'helps' : 'hurts'}${why(p) ? ` — ${why(p)}` : ''}`),
         (r.early_warning ?? []).length ? `EARLY WARNING: ${r.early_warning.map(w => `${nodes.get(w.node_id)?.question} → ${w.option} would ${w.direction === 'up' ? 'help' : 'hurt'} it`).join('; ')}` : null,
         'A forward test: untested, not advice.',
     ].filter(Boolean).join('\n')

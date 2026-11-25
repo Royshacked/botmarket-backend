@@ -35,6 +35,21 @@ export function effectEnded(node, effect, asOf) {
     return w != null && w.to <= 0
 }
 
+/** The two windows, in days from the run (Roy, 2026-11-25): near = 0–6 months, far = 6–24 months. */
+export const NEAR_DAYS = 183
+export const FAR_DAYS = 730
+
+/**
+ * The ONE window an effect counts in: where it STARTS (Roy, 2026-11-25 — prices move when the news lands; counted by
+ * overlap, 65% of a build's effects sat in both). Already started → near, until it ends. → 'near' | 'far' | null (past the
+ * far window). No run date, or an effect that cannot be dated → near. Pure.
+ */
+export function windowOf(node, effect, asOf) {
+    const w = asOf ? effectWindow(node, effect, asOf) : null
+    if (!w || w.from <= NEAR_DAYS) return 'near'
+    return w.from <= FAR_DAYS ? 'far' : null
+}
+
 const index = (list, x, def) => { const i = list.indexOf(x); return i === -1 ? list.indexOf(def) : i }
 /** Two runs' times for one effect → the LATER start and the SHORTER length; nothing when neither run gave any. Pure. */
 export function agreeTimes(x, y) {

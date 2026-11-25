@@ -18,7 +18,7 @@ const run = {
 test('summary: the calls, the early warnings, open and settled questions, the last decisions; untested said', () => {
     const s = formatSummary(run)
     assert.match(s, /A forward test, untested/)
-    assert.match(s, /INDUSTRY CALLS .*Oil & Gas Exploration wins 62%/)
+    assert.match(s, /INDUSTRY CALLS, NEAR.*Oil & Gas Exploration wins 62%/)
     assert.match(s, /EARLY WARNINGS .*Hormuz disrupted\? → Disrupted \(25%\)/)
     assert.match(s, /- Does the US strike Iran by end of Q1\? — Strikes 35% \/ Standoff 65%/)
     assert.match(s, /SETTLED \(1\): Hormuz disrupted\? — Disrupted 20% \(dormant\) \/ Normal 80%/)
@@ -30,7 +30,7 @@ test('industry: its chances and the branches behind, with why; an unknown name l
     assert.match(s, /wins 62%, loses 10%/)
     assert.match(s, /"Does the US strike Iran by end of Q1\?" \(resolves by 2025-03-31\) → Strikes: helps — oil spikes/)
     assert.match(s, /size medium \(how big the average push[\s\S]*not a position size\)/)
-    assert.match(s, /HORIZON: there is no single one[\s\S]*3 and 6 months/)
+    assert.match(s, /HORIZON: an effect counts in the window it starts in[\s\S]*3 and 6 months/)
     assert.match(formatIndustry(run, 'banks'), /scores no industry matching "banks"/)
 })
 

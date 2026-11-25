@@ -274,6 +274,12 @@ export function checkDropped(input = {}) {
 }
 
 /** An industry's score for one run (§6). Chances in [0, 1], win + lose ≤ 1 (the rest is "no clear effect"). */
+const macroOf = (m) => (m && isProb(m.p_win) && isProb(m.p_lose) ? { p_win: m.p_win, p_lose: m.p_lose } : null)
+const farOf = (f) => (f && isProb(f.p_win) && isProb(f.p_lose) && f.p_win + f.p_lose <= 1 + SUM_TOLERANCE ? {
+    p_win: f.p_win, p_lose: f.p_lose, bucket: BUCKETS.includes(f.bucket) ? f.bucket : null, agreement: isProb(f.agreement) ? f.agreement : null,
+    expected: typeof f.expected === 'number' && Number.isFinite(f.expected) ? f.expected : null, paths: Array.isArray(f.paths) ? f.paths.slice(0, 50) : [], macro: macroOf(f.macro),
+} : null)
+
 export function checkIndustry(input = {}) {
     const code = text(input.code, 20), name = text(input.name, 120)
     if (!code || !name) return bad('an industry needs its code and name')
@@ -289,7 +295,9 @@ export function checkIndustry(input = {}) {
         paths: Array.isArray(input.paths) ? input.paths.slice(0, 50) : [],
         early_warning: input.early_warning ?? null,
         // The chances over the MACRO branches alone (layers §6): the macro layer's own industry score, kept beside.
-        macro: input.macro && isProb(input.macro.p_win) && isProb(input.macro.p_lose) ? { p_win: input.macro.p_win, p_lose: input.macro.p_lose } : null,
+        macro: macroOf(input.macro),
+        // The FAR window's score (horizons §4): the top-level numbers are the near window's. Null on a run from before it.
+        far: farOf(input.far),
     })
 }
 

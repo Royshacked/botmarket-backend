@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { happensOn, effectWindow, effectEnded, agreeTimes, START_DAYS, LAST_DAYS } from '../../services/situation/horizon.js'
+import { happensOn, effectWindow, effectEnded, agreeTimes, windowOf, START_DAYS, LAST_DAYS } from '../../services/situation/horizon.js'
 import { mapSchema, shapeEffects, agreeEffects, scoreIndustries } from '../../services/situation/industries.js'
 import { withMacroScores } from '../../services/situation/layers.js'
-import { checkNode } from '../../services/situation/model.js'
+import { checkNode, checkIndustry } from '../../services/situation/model.js'
 
 const asOf = '2026-11-25'
 const live = (resolve_by) => ({ node_id: 'n', status: 'live', resolve_by, options: [{ key: 'a', label: 'a', p: 1 }, { key: 'b', label: 'b', p: 0 }] })
@@ -63,4 +63,30 @@ test('scoring: a resolved effect that has ended leaves the score and its industr
     assert.deepEqual(rows.map(r => [r.code, r.p_win]), [['LONG', 1]])
     assert.equal(scoreIndustries([n], [], effects, inds, { samples: 50 }).length, 2)
     assert.equal(withMacroScores([{ code: 'SHORT' }], [n], [], effects, inds, { asOf })[0].macro.p_win, 0)
+})
+
+test('windowOf: one window, where the effect starts', () => {
+    assert.equal(windowOf(live('2027-03-31'), { starts: 'now', lasts: 'years' }, asOf), 'near')
+    assert.equal(windowOf(live('2027-05-27'), { starts: 'now' }, asOf), 'near', 'day 183')
+    assert.equal(windowOf(live('2027-05-28'), { starts: 'now' }, asOf), 'far', 'day 184')
+    assert.equal(windowOf(live('2027-03-31'), { starts: 'months' }, asOf), 'far')
+    assert.equal(windowOf(live('2029-01-01'), { starts: 'now' }, asOf), null)
+    assert.equal(windowOf(done('2026-06-01'), { starts: 'now', lasts: 'years' }, asOf), 'near')
+    assert.equal(windowOf(live('2029-01-01'), {}, null), 'near')
+})
+
+test('scoring: near and far are summed apart over the same paths; opposite effects do not cancel across windows; the macro score has both', () => {
+    const n = { ...live('2027-01-31'), tree: 't', question: 'Q?' }
+    const effects = new Map([['n|a', [{ code: 'X', direction: 'up', bucket: 'large', starts: 'now', lasts: 'weeks' }, { code: 'Y', direction: 'down', bucket: 'small', starts: 'next_year', lasts: 'years' }]]])
+    const inds = [{ code: 'X', name: 'X', level: 'industry' }, { code: 'Y', name: 'Y', level: 'industry' }]
+    const rows = scoreIndustries([n], [], effects, inds, { samples: 50, asOf })
+    const x = rows.find(r => r.code === 'X'), y = rows.find(r => r.code === 'Y')
+    assert.deepEqual([x.p_win, x.far.p_win, x.far.paths.length], [1, 0, 0])
+    assert.deepEqual([y.p_lose, y.paths.length, y.far.p_lose, y.far.paths.length], [0, 0, 1, 1])
+    const m = withMacroScores(rows, [n], [], effects, inds, { asOf })
+    assert.equal(m.find(r => r.code === 'Y').far.macro.p_lose, 1)
+    assert.equal(m.find(r => r.code === 'Y').macro.p_lose, 0)
+    const saved = checkIndustry(m.find(r => r.code === 'Y'))
+    assert.equal(saved.ok, true); assert.equal(saved.value.far.macro.p_lose, 1)
+    assert.equal(checkIndustry({ code: 'X', name: 'X', p_win: 0, p_lose: 0 }).value.far, null, 'an old row')
 })

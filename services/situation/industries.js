@@ -16,7 +16,7 @@ import { callAnthropicStructured } from '../../providers/anthropic.provider.js'
 import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
 import { BUCKETS, STARTS, LASTS } from './model.js'
-import { agreeTimes, effectEnded } from './horizon.js'
+import { agreeTimes, effectEnded, windowOf } from './horizon.js'
 import { marginal } from './propagate.js'
 import { exposureLine } from './exposure.js'
 import { logger } from '../logger.service.js'
@@ -170,7 +170,8 @@ export function walkOrder(nodes) {
 /**
  * Sample the network `samples` times and add up each industry's effects → rows for model.checkIndustry, best chance
  * of winning first. `industries` gives names; `effects` is mapBranches' map. With
- * `asOf`, a resolved question's effect that has ended (horizon.js) no longer counts. Pure.
+ * `asOf`, a resolved question's effect that has ended (horizon.js) no longer counts, and each effect counts in one window: the
+ * row's own numbers are the NEAR window's (0–6 months) and `far` holds the far one's (6–24); without it all is near. Pure.
  */
 export function scoreIndustries(nodes, links, effects, industries, { samples = SAMPLES, seed = SEED, asOf = null } = {}) {
     const order = walkOrder(nodes)
@@ -183,9 +184,17 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
     const levels = new Map(industries.map(i => [i.code, i.level]))
     // Only what a sample can draw: a dropped or split question's effects never fire, and an industry mapped only there
     // came out 0% / 0% with no path (prod, 2026-11-24: Rail and Cargo Ground, from a question dropped that run).
-    const codes = [...new Set([...acting.values()].flat().map(e => e.code))]
-    const win = new Map(codes.map(c => [c, 0])), lose = new Map(codes.map(c => [c, 0])), sumNet = new Map(codes.map(c => [c, 0]))
-    const contrib = new Map(codes.map(c => [c, new Map()]))   // code → "node|option" → signed weight × count
+    // Each effect counts in ONE window (horizon.windowOf): two sums over the same samples.
+    const inWindow = { near: new Map(), far: new Map() }
+    for (const [k, fx] of acting) {
+        const n = map.get(k.split('|')[0])
+        for (const e of fx) { const w = windowOf(n, e, asOf); if (w) { if (!inWindow[w].has(k)) inWindow[w].set(k, []); inWindow[w].get(k).push(e) } }
+    }
+    const WINDOWS = Object.keys(inWindow)
+    const codes = [...new Set(WINDOWS.flatMap(w => [...inWindow[w].values()].flat().map(e => e.code)))]
+    const tally = () => ({ win: new Map(codes.map(c => [c, 0])), lose: new Map(codes.map(c => [c, 0])), sumNet: new Map(codes.map(c => [c, 0])),
+        contrib: new Map(codes.map(c => [c, new Map()])) })   // contrib: code → "node|option" → signed weight × count
+    const sums = { near: tally(), far: tally() }
     const rand = rng(seed)
     for (let s = 0; s < samples; s++) {
         const drawn = new Map()   // node_id → option
@@ -204,37 +213,38 @@ export function scoreIndustries(nodes, links, effects, industries, { samples = S
             for (let i = 0; i < w.length; i++) { r -= w[i]; if (r <= 0) { pick = n.options[i].key; break } }
             drawn.set(n.node_id, pick)
         }
-        const net = new Map()
-        for (const [id, opt] of drawn) {
-            for (const e of acting.get(`${id}|${opt}`) ?? []) {
-                const v = (e.direction === 'up' ? 1 : -1) * BUCKET_WEIGHT[e.bucket]
-                net.set(e.code, (net.get(e.code) ?? 0) + v)
-                const c = contrib.get(e.code)
-                c.set(`${id}|${opt}`, (c.get(`${id}|${opt}`) ?? 0) + v)
+        for (const w of WINDOWS) {
+            const { win, lose, sumNet, contrib } = sums[w]
+            const net = new Map()
+            for (const [id, opt] of drawn) {
+                for (const e of inWindow[w].get(`${id}|${opt}`) ?? []) {
+                    const v = (e.direction === 'up' ? 1 : -1) * BUCKET_WEIGHT[e.bucket]
+                    net.set(e.code, (net.get(e.code) ?? 0) + v)
+                    const c = contrib.get(e.code)
+                    c.set(`${id}|${opt}`, (c.get(`${id}|${opt}`) ?? 0) + v)
+                }
+            }
+            for (const [code, v] of net) {
+                if (v > 0) win.set(code, win.get(code) + 1)
+                else if (v < 0) lose.set(code, lose.get(code) + 1)
+                sumNet.set(code, sumNet.get(code) + v)
             }
         }
-        for (const [code, v] of net) {
-            if (v > 0) win.set(code, win.get(code) + 1)
-            else if (v < 0) lose.set(code, lose.get(code) + 1)
-            sumNet.set(code, sumNet.get(code) + v)
-        }
     }
-    const rows = codes.map(code => {
+    const scoreIn = (w, code) => {
+        const { win, lose, sumNet, contrib } = sums[w]
         const pw = win.get(code) / samples, pl = lose.get(code) / samples
         const mean = sumNet.get(code) / samples
         const moving = pw + pl
         const paths = [...contrib.get(code).entries()].map(([k, v]) => {
             const [node_id, option] = k.split('|')
             const n = map.get(node_id)
-            // The horizon of this branch: its question resolves by this date (the network has no single horizon).
             return { node_id, option, question: n?.question ?? null, label: n?.options.find(o => o.key === option)?.label ?? option, weight: v / samples, resolve_by: n?.resolve_by ?? null }
         }).sort((a, b) => Math.abs(b.weight) - Math.abs(a.weight)).slice(0, 6)
-        return {
-            level: levels.get(code) ?? 'sub_industry', code, name: names.get(code) ?? code, p_win: pw, p_lose: pl,
-            bucket: Math.abs(mean) >= 2.5 ? 'large' : Math.abs(mean) >= 1 ? 'medium' : 'small',
-            agreement: moving > 0 ? Math.max(pw, pl) / moving : null, expected: mean, paths,
-        }
-    })
+        return { p_win: pw, p_lose: pl, bucket: Math.abs(mean) >= 2.5 ? 'large' : Math.abs(mean) >= 1 ? 'medium' : 'small',
+            agreement: moving > 0 ? Math.max(pw, pl) / moving : null, expected: mean, paths }
+    }
+    const rows = codes.map(code => ({ level: levels.get(code) ?? 'sub_industry', code, name: names.get(code) ?? code, ...scoreIn('near', code), far: asOf ? scoreIn('far', code) : null }))
     return rows.sort((a, b) => (b.p_win - b.p_lose) - (a.p_win - a.p_lose))
 }
 

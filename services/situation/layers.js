@@ -157,7 +157,8 @@ export function withMacroScores(rows, nodes, links, effects, industries, opts = 
     const macroEffects = new Map([...effects].filter(([k]) => ids.has(k.split('|')[0])))
     const macroLinks = links.filter(l => ids.has(l.from.node_id) && ids.has(l.to.node_id))
     const m = new Map(scoreIndustries(macroNodes, macroLinks, macroEffects, industries, opts).map(r => [r.code, r]))
-    return rows.map(r => ({ ...r, macro: { p_win: m.get(r.code)?.p_win ?? 0, p_lose: m.get(r.code)?.p_lose ?? 0 } }))
+    const of = (x) => ({ p_win: x?.p_win ?? 0, p_lose: x?.p_lose ?? 0 })
+    return rows.map(r => ({ ...r, macro: of(m.get(r.code)), ...(r.far ? { far: { ...r.far, macro: of(m.get(r.code)?.far) } } : {}) }))
 }
 
 /** Run `fn` over `xs`, `k` at a time, in order. */
