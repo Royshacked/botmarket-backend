@@ -7,7 +7,7 @@
 // INDUSTRIES: at each run, "long" = chance it wins ≥ 60%, "short" = chance it loses ≥ 60%; long minus short, each
 // against the equal-weight average of every industry_index basket, at 63 and 126 trading days (3 and 6 months).
 // FAR (horizons §5): the far window's calls, graded from month 6 on — to month 12 (an early read) and to month 24.
-// Reported beside, never in the verdict: the first full far grade comes 24 months in.
+// Each side against the average on its own. Reported beside, never in the verdict: the first full far grade comes 24 months in.
 // CONTROL: the same model asked weekly, with no network, which industries win over six months (control.js), scored the
 // same way.
 // PASS when ALL hold: (1) Brier better than equal odds on ≥ 100 resolved questions; (2) calibration within 10 points in
@@ -17,6 +17,7 @@
 import { getDb } from '../../providers/mongodb.provider.js'
 import { getEngineDb } from '../engineDb.js'
 import { COLLECTIONS } from './store.js'
+import { realDate } from './model.js'
 
 export const CALL_AT = 0.6
 export const HORIZONS = Object.freeze({ m3: 63, m6: 126 })
@@ -28,7 +29,7 @@ export const BUCKET_EDGES = Object.freeze([0, 0.2, 0.4, 0.6, 0.8, 1.0001])
 export const PASS = Object.freeze({ minQuestions: 100, calibrationPts: 0.10, minPerBucket: 15, tMin: 2, minMonths: 12 })
 export const CONTROL = 'situation_control'
 
-const _io = { db: () => getDb(), engineDb: () => getEngineDb(), now: () => new Date() }
+const _io = { start: () => process.env.SITUATION_TEST_START ?? null, db: () => getDb(), engineDb: () => getEngineDb(), now: () => new Date() }
 export function _setIO(io) { Object.assign(_io, io); _index = null }
 
 /** 63 trading days is about 90 calendar days: before that no call has a 3-month result. */
@@ -84,9 +85,18 @@ export function nodeScores(rows) {
  * skipped. → `[{ as_of, spread }]`. Pure.
  */
 export function spreads(calls, index, h, from = 0) {
+    return sides(calls.filter(c => c.long.length && c.short.length), index, h, from)
+        .filter(x => x.long != null && x.short != null).map(x => ({ as_of: x.as_of, spread: x.long + x.short }))
+}
+
+/**
+ * Each scored date's two sides apart, each against the equal-weight average of all baskets: `long` is how much its long
+ * calls beat it, `short` how much its short calls trailed it (null: no call that side). Pure.
+ */
+export function sides(calls, index, h, from = 0) {
     const out = []
     for (const c of calls) {
-        if (!c.long.length || !c.short.length) continue
+        if (!c.long.length && !c.short.length) continue
         const rets = new Map()
         for (const d of index) {
             const i = (d.dates ?? []).findIndex(x => x > c.as_of)
@@ -97,10 +107,19 @@ export function spreads(calls, index, h, from = 0) {
         const avg = mean([...rets.values()])
         const leg = (xs) => mean(xs.map(b => rets.get(b)).filter(v => typeof v === 'number'))
         const L = leg(c.long), S = leg(c.short)
-        if (L == null || S == null) continue
-        out.push({ as_of: c.as_of, spread: (L - avg) - (S - avg) })
+        if (L == null && S == null) continue
+        out.push({ as_of: c.as_of, long: L == null ? null : L - avg, short: S == null ? null : avg - S })
     }
     return out
+}
+
+/**
+ * One side at a time (the FAR calls: there is rarely both a long and a short, Roy 2026-11-25): `long` and `short`
+ * summarised apart, and together as each date's average over the sides it has. Pure.
+ */
+export function sideSummary(xs) {
+    const pick = (k) => spreadSummary(xs.filter(x => x[k] != null).map(x => ({ spread: x[k] })))
+    return { ...spreadSummary(xs.map(x => ({ spread: mean([x.long, x.short].filter(v => v != null)) }))), long: pick('long'), short: pick('short') }
 }
 
 /** A list of spreads → its mean, t and the two halves' signs. Pure. */
@@ -124,6 +143,16 @@ export function onePerWeek(items) {
     const m = new Map()
     for (const x of items) m.set(isoWeek(x.as_of), x)
     return [...m.values()]
+}
+
+/**
+ * THE START (Roy, 2026-11-25): SITUATION_TEST_START, a date. Only runs (and control answers) from it count; with none, the
+ * test has not started and everything shown is the trial. Set it to the day of a fresh BUILD: an update logs only the
+ * numbers it set, so a question carried over unmoved would have no forecast in the test. Pure.
+ */
+export function testScope(runs, control, start) {
+    if (!realDate(start)) return { started_on: null, runs, control }
+    return { started_on: start, runs: runs.filter(r => r.as_of >= start), control: control.filter(c => c.as_of >= start) }
 }
 
 /** One run's rows → its long and short baskets at CALL_AT; `pick` reads the score of a row (null: no score there). Pure. */
@@ -168,11 +197,12 @@ export async function buildScorecard() {
     const db = await _io.db(), edb = await _io.engineDb()
     const today = _io.now().toISOString().slice(0, 10)
     const P = { projection: { _id: 0 } }
-    const [forecasts, runs, control] = await Promise.all([
+    const [forecasts, allRuns, allControl] = await Promise.all([
         db.collection(COLLECTIONS.forecasts).find({ outcome: { $in: [0, 1] } }, P).toArray(),
         db.collection(COLLECTIONS.runs).find({ complete: true }, P).sort({ as_of: 1, finished_at: 1 }).toArray(),
         db.collection(CONTROL).find({}, P).sort({ as_of: 1 }).toArray(),
     ])
+    const { started_on: startedOn, runs, control } = testScope(allRuns, allControl, _io.start())
     // The basket lines are ~3 MB (28 s over the M0 link, the 2026-11-23 drive): read only once a call is old enough to
     // grade (3 months), and kept for INDEX_TTL_MS.
     const oldest = [runs[0]?.as_of, control[0]?.as_of].filter(Boolean).sort()[0] ?? null
@@ -202,11 +232,10 @@ export async function buildScorecard() {
     // as an option (the grading's `absent` rows). The missing-outcomes review works if this share falls.
     const unforeseen = unforeseenCount(counted)
     const distance = byDistance(counted, new Map(runs.map(r => [r.run_id, r.as_of])))
-    const farOf = (xs) => Object.fromEntries(Object.entries(FAR_HORIZONS).map(([k, { from, to }]) => [k, spreadSummary(spreads(xs, index, to, from))]))
+    const farOf = (xs) => Object.fromEntries(Object.entries(FAR_HORIZONS).map(([k, { from, to }]) => [k, sideSummary(sides(xs, index, to, from))]))
     const far = { ...farOf(farCalls), control: farOf(farCtrl) }
     const net = { m3: spreadSummary(spreads(calls, index, HORIZONS.m3)), m6: spreadSummary(spreads(calls, index, HORIZONS.m6)) }
     const macroOnly = { m3: spreadSummary(spreads(macroCalls, index, HORIZONS.m3)), m6: spreadSummary(spreads(macroCalls, index, HORIZONS.m6)) }
     const plain = { m3: spreadSummary(spreads(ctrl, index, HORIZONS.m3)), m6: spreadSummary(spreads(ctrl, index, HORIZONS.m6)) }
-    const startedOn = runs.find(r => r.kind === 'build')?.as_of ?? null
     return { as_of: today, started_on: startedOn, runs: runs.length, nodes, layers, distance, unforeseen, industries: net, far, macro_only: macroOnly, control: plain, verdict: verdict(nodes, net.m6, startedOn, today) }
 }

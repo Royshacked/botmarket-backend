@@ -22,7 +22,7 @@ const _system = makePromptLoader(join(__dirname, '../../prompts/situation_state.
 export const STATE_MODEL = 'claude-opus-5-5'
 export const STATE_EFFORT = 'high'
 export const LEVELS = Object.freeze(['low', 'medium', 'high'])
-export const MAX_QUESTIONS = 40
+export const MAX_QUESTIONS = 48
 /** The sections the model writes (regime gets its readings beside the code's facts). */
 export const WRITTEN = Object.freeze(['regime', 'policy', 'money', 'stories', 'calendar'])
 

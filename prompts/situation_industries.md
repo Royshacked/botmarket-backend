@@ -16,7 +16,9 @@ THE RULES
 1. Only industries from the list, by their code.
 2. `direction`: `up` (helps) or `down` (hurts), relative to the average industry, not to cash.
 3. `bucket`: `small`, `medium` or `large` — the size of the effect relative to the other industries it touches.
-4. `starts`: how long after the branch happens its effect on the industry begins. `now` (days to a few weeks),
+4. `starts`: how long after the branch HAPPENS its effect on the industry begins. Each branch shows the date its question
+   is answered by: count from THAT date, never from today. A question answered in December 2027 whose answer moves the
+   industry at once is `now`, however far away December 2027 is. `now` (days to a few weeks),
    `months` (it needs orders, prices or budgets to change first), `next_year` (a later budget, a plant, a rule that takes
    effect later).
 5. `lasts`: how long the effect goes on once it starts. `weeks` (a one-off: a release, a level of a price, a scare),

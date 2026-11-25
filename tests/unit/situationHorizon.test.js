@@ -1,10 +1,10 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { happensOn, effectWindow, effectEnded, agreeTimes, windowOf, START_DAYS, LAST_DAYS } from '../../services/situation/horizon.js'
+import { happensOn, effectWindow, effectEnded, agreeTimes, windowOf, isLong, longStatus, START_DAYS, LAST_DAYS } from '../../services/situation/horizon.js'
 import { mapSchema, shapeEffects, agreeEffects, scoreIndustries } from '../../services/situation/industries.js'
-import { withMacroScores } from '../../services/situation/layers.js'
-import { checkNode, checkIndustry } from '../../services/situation/model.js'
+import { withMacroScores, holdCaps, capDrop, LONG_CAP } from '../../services/situation/layers.js'
+import { checkNode, checkIndustry, checkDropped } from '../../services/situation/model.js'
 
 const asOf = '2026-11-25'
 const live = (resolve_by) => ({ node_id: 'n', status: 'live', resolve_by, options: [{ key: 'a', label: 'a', p: 1 }, { key: 'b', label: 'b', p: 0 }] })
@@ -89,4 +89,25 @@ test('scoring: near and far are summed apart over the same paths; opposite effec
     const saved = checkIndustry(m.find(r => r.code === 'Y'))
     assert.equal(saved.ok, true); assert.equal(saved.value.far.macro.p_lose, 1)
     assert.equal(checkIndustry({ code: 'X', name: 'X', p_win: 0, p_lose: 0 }).value.far, null, 'an old row')
+})
+
+test('long questions: their own places, beside the near ones; a long one comes into the near places as its date nears', () => {
+    const mk = (id, resolve_by, p = 0.5) => ({ node_id: id, tree: `t_${id}`, question: id, status: 'live', kind: 'open', impact: 'high', resolve_by, options: [{ key: 'a', label: 'a', p, effects: [] }, { key: 'b', label: 'b', p: 1 - p, effects: [] }] })
+    const nears = Array.from({ length: 30 }, (_, i) => mk(`n${i}`, '2027-03-31'))
+    const longs = Array.from({ length: LONG_CAP + 2 }, (_, i) => mk(`l${i}`, '2027-12-31', 0.5 + i * 0.02))
+    const out = holdCaps([...nears, ...longs], { asOf })
+    assert.deepEqual([...out], [[`l${LONG_CAP}`, 'long_full'], [`l${LONG_CAP + 1}`, 'long_full']])
+    assert.equal(holdCaps([...nears, longs[0]], { asOf: '2027-08-01' }).size, 1, 'near by then: 31 for 30 places')
+    assert.equal(isLong(mk('x', '2027-07-23'), asOf), false)
+    assert.equal(isLong(mk('x', '2027-07-24'), asOf), true)
+    assert.equal(isLong(mk('x', null), asOf), false)
+    assert.equal(isLong(mk('x', '2027-12-31'), null), false)
+    assert.equal(checkDropped({ considered: 1, open: 0, settled: 0, dropped: [capDrop(longs[0], 'long_full', asOf)] }).ok, true)
+})
+
+test('longStatus: a long question no near question moves is named; a link from another long one is no checkpoint', () => {
+    const n = (node_id, resolve_by, over = {}) => ({ node_id, status: 'live', kind: 'open', layer: 'macro', resolve_by, ...over })
+    const nodes = [n('near', '2027-01-31'), n('L1', '2027-12-31'), n('L2', '2028-06-30'), n('S', '2027-12-31', { layer: '45' })]
+    const links = [{ from: { node_id: 'near' }, to: { node_id: 'L1' } }, { from: { node_id: 'L1' }, to: { node_id: 'L2' } }]
+    assert.deepEqual(longStatus(nodes, links, asOf), { open: 2, unlinked: ['L2'] })
 })

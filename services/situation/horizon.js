@@ -6,6 +6,7 @@
 // `quarters`.
 
 import { STARTS, LASTS, realDate } from './model.js'
+import { MACRO, layerOf } from './sectors.js'
 
 export const START_DAYS = Object.freeze({ now: 0, months: 60, next_year: 365 })
 export const LAST_DAYS = Object.freeze({ weeks: 45, quarters: 270, years: 730 })
@@ -38,6 +39,8 @@ export function effectEnded(node, effect, asOf) {
 /** The two windows, in days from the run (Roy, 2026-11-25): near = 0–6 months, far = 6–24 months. */
 export const NEAR_DAYS = 183
 export const FAR_DAYS = 730
+/** A question is LONG past this many days: past the near window, so a May or June question does not take a long place. */
+export const LONG_DAYS = 240
 
 /**
  * The ONE window an effect counts in: where it STARTS (Roy, 2026-11-25 — prices move when the news lands; counted by
@@ -48,6 +51,22 @@ export function windowOf(node, effect, asOf) {
     const w = asOf ? effectWindow(node, effect, asOf) : null
     if (!w || w.from <= NEAR_DAYS) return 'near'
     return w.from <= FAR_DAYS ? 'far' : null
+}
+
+/** A LONG question: its answer is more than LONG_DAYS away (horizons §6). Pure. */
+export function isLong(node, asOf) {
+    return Boolean(asOf) && realDate(node.resolve_by) && (day(node.resolve_by) - day(asOf)) / DAY > LONG_DAYS
+}
+
+/**
+ * The open long macro questions and which have no CHECKPOINT: no link from a live question that is not long → `{ open,
+ * unlinked: [node_id] }`. Pure.
+ */
+export function longStatus(nodes, links, asOf) {
+    const open = nodes.filter(n => n.status === 'live' && n.kind === 'open' && layerOf(n) === MACRO && isLong(n, asOf))
+    const near = new Set(nodes.filter(n => n.status === 'live' && !isLong(n, asOf)).map(n => n.node_id))
+    const linked = new Set(links.filter(l => l.live !== false && near.has(l.from.node_id)).map(l => l.to.node_id))
+    return { open: open.length, unlinked: open.filter(n => !linked.has(n.node_id)).map(n => n.node_id) }
 }
 
 const index = (list, x, def) => { const i = list.indexOf(x); return i === -1 ? list.indexOf(def) : i }

@@ -1,7 +1,7 @@
 import { test } from 'node:test'
 import assert from 'node:assert/strict'
 
-import { nodeScores, spreads, spreadSummary, verdict, callsOf, byDistance, FAR_HORIZONS, HORIZONS, PASS } from '../../services/situation/scorecard.js'
+import { nodeScores, spreads, spreadSummary, verdict, callsOf, sides, sideSummary, byDistance, testScope, FAR_HORIZONS, HORIZONS, PASS } from '../../services/situation/scorecard.js'
 import { runControl, controlSchema, _setIO } from '../../services/situation/control.js'
 
 const near = (a, b, tol = 1e-9) => assert.ok(Math.abs(a - b) <= tol, `${a} ≉ ${b}`)
@@ -95,4 +95,29 @@ test('runControl keeps the far pair; an impossible one is dropped, not the row',
     await runControl({ sections: { regime: [] } }, [{ code: 'G', name: 'Gold', level: 'industry' }, { code: 'H', name: 'Homes', level: 'industry' }], '2025-01-07')
     assert.deepEqual(stored.rows.map(r => r.far), [{ p_win: 0.2, p_lose: 0.6 }, null])
     assert.ok(controlSchema().properties.industries.items.required.includes('far_win'))
+})
+
+test('testScope: no date, the test has not started and everything is the trial; with one, only what came from it counts', () => {
+    const runs = [{ as_of: '2026-11-23' }, { as_of: '2026-12-05' }], control = [{ as_of: '2026-11-24' }, { as_of: '2026-12-05' }]
+    assert.deepEqual(testScope(runs, control, null), { started_on: null, runs, control })
+    assert.equal(testScope(runs, control, 'soon').started_on, null)
+    const s = testScope(runs, control, '2026-12-05')
+    assert.deepEqual([s.started_on, s.runs.length, s.control.length], ['2026-12-05', 1, 1])
+    assert.equal(verdict({ all: { questions: 500, brier: 0.1, equal_odds: 0.25, calibration: [{ n: 20, said: 0.5, happened: 0.5 }] } }, { n: 9, mean: 1, t: 9, first_half: 1, second_half: 1 }, null, '2030-01-01').pass, false)
+})
+
+test('sides: a date with one side only is graded on it; the two apart, and together; spreads still needs both', () => {
+    const dates = Array.from({ length: 30 }, (_, i) => `2025-01-${String(i + 1).padStart(2, '0')}`)
+    const mk = (id, end) => ({ _id: id, dates, levels: dates.map((_, i) => (i > 5 ? end : 100)) })
+    const index = [mk('industry:L', 112), mk('industry:S', 88), ...Array.from({ length: 10 }, (_, i) => mk(`industry:f${i}`, 100))]
+    const only = (long, short) => [{ as_of: '2025-01-03', long, short }]
+    near(sides(only(['industry:L'], []), index, 10)[0].long, 0.12)
+    assert.equal(sides(only(['industry:L'], []), index, 10)[0].short, null)
+    near(sides(only([], ['industry:S']), index, 10)[0].short, 0.12)
+    assert.equal(sides(only([], []), index, 10).length, 0)
+    assert.equal(spreads(only(['industry:L'], []), index, 10).length, 0)
+    near(spreads(only(['industry:L'], ['industry:S']), index, 10)[0].spread, 0.24)
+    const x = sideSummary([{ long: 0.1, short: null }, { long: 0.1, short: 0.3 }])
+    assert.deepEqual([x.n, x.long.n, x.short.n], [2, 2, 1])
+    near(x.mean, 0.15)
 })

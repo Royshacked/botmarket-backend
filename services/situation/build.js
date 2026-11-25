@@ -12,9 +12,10 @@ import { buildState } from './state.js'
 import { buildNetwork, OPEN_CAP, BUILD_SLACK } from './network.js'
 import { buildExposures } from './exposure.js'
 import { mapBranches, scoreIndustries, wouldBeEntries } from './industries.js'
-import { buildSectorLayer, promote, capOut, capDrop, anchorLinks, withMacroScores } from './layers.js'
+import { buildSectorLayer, promote, capOut, capDrop, LONG_CAP, anchorLinks, withMacroScores } from './layers.js'
 import { buildDataSections } from './state.data.js'
 import { MACRO, layerOf, originOf } from './sectors.js'
+import { longStatus } from './horizon.js'
 import { saveRun, latestRun, readRun } from './store.js'
 import { config } from '../config.js'
 import { logger } from '../logger.service.js'
@@ -56,7 +57,7 @@ export async function mapByLayer(nodes, industries, map = _io.mapBranches) {
  */
 export function settle({ nodes, links, forecasts, dropped, asOf }) {
     const pr = promote(nodes)
-    const out = capOut(pr.nodes)
+    const out = capOut(pr.nodes, { asOf })
     const kept = pr.nodes.filter(n => !out.has(n.node_id))
     const ids = new Set(kept.map(n => n.node_id))
     const keptLinks = links.filter(l => ids.has(l.from.node_id) && ids.has(l.to.node_id))
@@ -87,7 +88,7 @@ export async function buildFull({ asOf = new Date().toISOString().slice(0, 10), 
         const st = await _io.buildState(asOf)
         cost.state = st.cost_usd ?? 0
         if (!st.ok) return { ok: false, stage: 'state', reason: st.reason, cost_usd: total() }
-        const net = await _io.buildNetwork(st.state, st.questions, { cap: Math.ceil(OPEN_CAP * BUILD_SLACK) })
+        const net = await _io.buildNetwork(st.state, st.questions, { cap: Math.ceil((OPEN_CAP + LONG_CAP) * BUILD_SLACK) })
         cost.network = net.cost_usd ?? 0
         if (!net.ok) return { ok: false, stage: 'network', reason: net.reason, cost_usd: total() }
         // The sector layer under it (situation-network-layers.md).
@@ -115,7 +116,7 @@ export async function buildFull({ asOf = new Date().toISOString().slice(0, 10), 
         const stats = {
             cost_usd: total(), cost_by_stage: cost, gaps: [...st.gaps, ...exp.gaps, ...sec.gaps], questions: st.questions.length,
             nodes: done.nodes.length, links: done.links.length, dropped: done.dropped.dropped.length, runs: net.runs,
-            effects_dropped: mapped.dropped, entries, model_answers_dropped: st.dropped,
+            effects_dropped: mapped.dropped, entries, model_answers_dropped: st.dropped, long: longStatus(done.nodes, done.links, asOf),
             sectors: { built: sec.sector_states.map(s => s.sector), failed: sec.failed, promoted: done.promoted },
         }
         const saved = await _io.saveRun({
@@ -168,7 +169,7 @@ export async function buildSectors({ asOf = new Date().toISOString().slice(0, 10
         const entries = wouldBeEntries(prev.industries ?? [], industries, asOf)
         const stats = {
             cost_usd: total(), cost_by_stage: cost, gaps: [...(data.gaps ?? []), ...exp.gaps, ...sec.gaps], nodes: done.nodes.length, links: done.links.length,
-            entries, effects_dropped: mapped.dropped, sectors: { built: sec.sector_states.map(s => s.sector), failed: sec.failed, promoted: done.promoted },
+            entries, effects_dropped: mapped.dropped, long: longStatus(done.nodes, done.links, asOf), sectors: { built: sec.sector_states.map(s => s.sector), failed: sec.failed, promoted: done.promoted },
         }
         const saved = await _io.saveRun({
             run: { kind: 'sectors', as_of: asOf, parent_run_id: head.run_id },

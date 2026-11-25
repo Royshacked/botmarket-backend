@@ -27,9 +27,13 @@ THE SECTIONS YOU WRITE
   bank gold buying, large deals, crowded trades — as reported. 2–8 items.
 - `stories`: the active market themes and the geopolitical situations. For each: its state now, its maturity (early,
   building, mature, fading) and who is exposed, as a reading. 4–12 items.
-- `calendar`: known dated events in the next 3–6 months that the code's calendar does not have (deadlines, summits,
+- `calendar`: known dated events in the next 3–6 months that the code's calendar does not have, and the few fixed later ones that matter, up to 24 months out (deadlines, summits,
   elections, tariff dates, treaty or ceasefire dates). Put the date at the start of the text. 0–10 items.
-- `questions`: the open questions the network is grown from — 15 to 35 of them. Each:
+- `questions`: the open questions the network is grown from — 15 to 35 NEAR ones (most answered within 6 months) and 5 to 8
+  LONG ones (answered 9 to 24 months from the as-of date). A long question is about something that moves slowly and that
+  the material bears on: the path of rates to a date next year or after, the level of AI spending in a later year, a tariff
+  regime that stays or is struck down, an election, a law's expiry. Put the date in its text, and ask it so that the near
+  questions say something about it on the way. Do not just stretch a near question's date. Each question:
   - a question about what happens NEXT, answerable later by what actually happens, with a horizon in it where it
     helps ("by the end of Q1", "at the next FOMC");
   - 2–4 options that are mutually exclusive and together cover what can reasonably happen (lower_snake keys);

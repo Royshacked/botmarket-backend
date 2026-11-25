@@ -61,7 +61,7 @@ export function branchList(nodes) {
     const out = []
     for (const n of nodes) {
         if (n.status === 'dropped' || n.status === 'split') continue
-        for (const o of n.options) out.push({ node_id: n.node_id, option: o.key, question: n.question, label: o.label, p: o.p, dormant: Boolean(o.dormant) })
+        for (const o of n.options) out.push({ node_id: n.node_id, option: o.key, question: n.question, label: o.label, p: o.p, dormant: Boolean(o.dormant), by: n.status === 'resolved' ? n.resolved?.on ?? null : n.resolve_by ?? null })
     }
     return out
 }
@@ -71,7 +71,7 @@ export function mapPrompt(branches, industries) {
     return [
         `THE INDUSTRIES (${industries.length}; code, name, evidence):`, ...industries.map(exposureLine), '',
         `THE BRANCHES (${branches.length}):`,
-        ...branches.map((b, i) => `${i + 1}. "${b.question}" → ${b.label} (${Math.round(b.p * 100)}%${b.dormant ? ', dormant' : ''})`), '',
+        ...branches.map((b, i) => `${i + 1}. "${b.question}" → ${b.label} (${Math.round(b.p * 100)}%${b.dormant ? ', dormant' : ''}${b.by ? `; answered by ${b.by}` : ''})`), '',
         'Map every branch.',
     ].join('\n')
 }

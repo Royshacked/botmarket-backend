@@ -18,6 +18,7 @@ as-of date.
      `energy`, `growth_jobs`
      (all AI spending, chips and data centres are `ai_buildout`; the Fed, inflation and yields `inflation_fed_rates`; oil and gas
      `energy`). Name a new tree only when none fits.
+     It may be a LONG question (answered 9 to 24 months out) when the news opens one that moves slowly.
    - `resolves`: it settles a question. Name the option that happened and the evidence. Each option shows what it
      ASSUMES (its industry effects); a separate check then asks whether what happened matches them, so make the
      evidence say what actually happened (who, what), not just the option's label.

@@ -19,11 +19,15 @@ You are given the state (dated, sourced) and the questions, numbered. For EVERY 
    Otherwise null. Use it for a FOLLOW-UP: a question that only matters once an option happens and that decides which
    way industries move then ("Who becomes CEO?" under "names a permanent CEO: Yes"). No chains just for structure:
    a question that stands alone stays alone, and a follow-up goes two levels at most.
-8. `duplicate_of`: the number of an earlier question that asks the same thing, or null.
+8. `duplicate_of`: the number of an earlier question that asks the same thing, or null. The same topic at another date is
+   NOT a duplicate (the next Fed meeting; the Fed's rate at the end of next year).
+LONG questions (answered more than 8 months out): look hard for a base rate, and say `low` confidence when there is
+none; less is known, so do not be surer than the base rate and the state allow.
 
 Then the LINKS: where one question's option, if it happens, makes an option of ANOTHER question more or less likely.
 For each: `from` `{ question, option }`, `to` `{ question, option }`, `direction` (`raises` / `lowers`), `strength`
-(`small` / `medium` / `large`), `lag_days` `{ min, max }`, and `why` (one sentence). Only real, direct channels — an
+(`small` / `medium` / `large`), `lag_days` `{ min, max }`, and `why` (one sentence). A long question should be moved by
+at least one near question, whose answer is a checkpoint on the way to it: link it. Only real, direct channels — an
 Iran strike raises "inflation rises" through oil; a growth scare raises "the Fed cuts". Not every pair is linked.
 A link never joins a question to itself, and never repeats what `given` already says.
 

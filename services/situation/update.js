@@ -29,6 +29,7 @@ import { mapByLayer } from './build.js'
 import { macroBackdrop, sectorPriceItems, rewriteSectorState } from './sectorState.js'
 import { rewriteState } from './state.js'
 import { reviewOutcomes, applyOutcomes, effectLine, checkResolutions } from './outcomes.js'
+import { longStatus } from './horizon.js'
 import { MACRO, SECTORS, SECTOR_CODES, layerOf, originOf, layerName, topNames } from './sectors.js'
 import { config } from '../config.js'
 import { buildDataSections } from './state.data.js'
@@ -449,7 +450,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
         // dropped one goes with it.
         const pr = promote(nodes)
         nodes = pr.nodes
-        const out = capOut(nodes, { unmapped })
+        const out = capOut(nodes, { unmapped, asOf })
         const capDrops = nodes.filter(n => out.has(n.node_id)).map(n => capDrop(n, out.get(n.node_id), asOf))
         nodes = nodes.map(n => (out.has(n.node_id) ? { ...n, status: 'dropped' } : n))
         // Links: the ones still between two kept nodes, plus new ones for the questions this update added.
@@ -555,7 +556,7 @@ export async function runUpdate({ kind = 'weekly', trigger = null, asOf = new Da
             cost_usd: cost, decisions: applied.decisions, woken: early, resolved: applied.resolved, created: applied.created,
             changes: spread.changes, rounds: spread.rounds, settled: spread.settled, review, entries,
             gaps: [...results.flatMap(r => r.news?.gaps ?? []), ...layerGaps, ...checkGaps, ...outcomeGaps, ...dataGaps],
-            links_added: linksAdded, promoted: pr.promoted, outcomes,
+            long: longStatus(keep, links, asOf), links_added: linksAdded, promoted: pr.promoted, outcomes,
             unforeseen: applied.resolved.filter(r => r.unforeseen).map(r => r.node_id),
             layers: results.map(r => ({ layer: r.layer, articles: r.news?.articles?.length ?? 0, decisions: (r.data?.events ?? []).length, ran: Boolean(r.data), skipped: Boolean(r.skipped) })),
             sectors: prev.run?.stats?.sectors ? { ...prev.run.stats.sectors, promoted: pr.promoted } : (sector_states.length ? { built: sector_states.map(x => x.sector), failed: [], promoted: pr.promoted } : null),

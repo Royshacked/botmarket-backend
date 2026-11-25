@@ -26,7 +26,7 @@ export const BUCKETS = Object.freeze(['small', 'medium', 'large'])
 /** When an effect starts after its branch happens, and how long it lasts — in order (horizon.js has the days). */
 export const STARTS = Object.freeze(['now', 'months', 'next_year'])
 export const LASTS = Object.freeze(['weeks', 'quarters', 'years'])
-export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'story_full', 'reworded', 'parent_resolved'])
+export const DROP_REASONS = Object.freeze(['low_impact', 'nearly_settled', 'duplicate', 'too_far_out', 'cap', 'story_full', 'long_full', 'reworded', 'parent_resolved'])
 export const EVENT_DECISIONS = Object.freeze(['moves_option', 'new_option', 'new_question', 'resolves', 'outside'])
 
 /** A settled node has one option at or above this; below it the node is open (§3: "one option dominates"). */

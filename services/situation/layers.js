@@ -15,6 +15,7 @@ import { buildSectorState } from './sectorState.js'
 import { buildNetwork, linksFor, uncertainty, IMPACT_WEIGHT, OPEN_CAP, BUILD_SLACK } from './network.js'
 import { marginal } from './propagate.js'
 import { scoreIndustries } from './industries.js'
+import { isLong } from './horizon.js'
 import { SECTORS, SECTOR_CAP, SECTORS_TOTAL_CAP, PROMOTE_AT, MACRO, layerOf, originOf, sectorOf, layerName, topNames } from './sectors.js'
 import { logger } from '../logger.service.js'
 
@@ -30,6 +31,8 @@ export const CORE_TREES = Object.freeze(['inflation_fed_rates', 'growth_jobs', '
 export const CORE_PLACES = 2
 /** At most this many open macro questions on one story (tree): the scores add up, so a story asked ten times counts ten times. */
 export const PER_TREE = 6
+/** Open LONG macro questions kept, in places of their own (horizons §6): they never compete with the near ones. */
+export const LONG_CAP = 8
 /** The tree of a question that named none: not a story, so never limited. */
 const NO_TREE = 'other'
 /** Reach: how many industries the branches move, as a factor — REACH_MIN at one or none, REACH_MAX at REACH_FULL or more. */
@@ -63,11 +66,11 @@ function macroOut(sorted, cap) {
 }
 
 /**
- * The cap per layer → `Map(node id → 'cap' | 'story_full')` of those moved out, lowest-ranked first in each layer: macro
- * over OPEN_CAP (macroOut); each sector over SECTOR_CAP; then every sector together over SECTORS_TOTAL_CAP. Only LIVE,
+ * The cap per layer → `Map(node id → 'cap' | 'story_full' | 'long_full')` of those moved out, lowest-ranked first in each layer: macro
+ * over OPEN_CAP (macroOut), its long questions over LONG_CAP; each sector over SECTOR_CAP; then every sector together over SECTORS_TOTAL_CAP. Only LIVE,
  * OPEN nodes count. Pure.
  */
-export function holdCaps(nodes, { macro = OPEN_CAP, sector = SECTOR_CAP, total = SECTORS_TOTAL_CAP, unmapped = new Set() } = {}) {
+export function holdCaps(nodes, { macro = OPEN_CAP, sector = SECTOR_CAP, total = SECTORS_TOTAL_CAP, long = LONG_CAP, asOf = null, unmapped = new Set() } = {}) {
     const open = nodes.filter(n => n.status === 'live' && n.kind === 'open')
     const rank = (n) => rankOf(n, unmapped)
     const out = new Map()
@@ -76,7 +79,11 @@ export function holdCaps(nodes, { macro = OPEN_CAP, sector = SECTOR_CAP, total =
     const kept = []
     for (const [l, ns] of byLayer) {
         const sorted = [...ns].sort((a, b) => rank(b) - rank(a))
-        if (l === MACRO) { for (const [id, reason] of macroOut(sorted, macro)) out.set(id, reason); continue }
+        if (l === MACRO) {
+            for (const [id, reason] of macroOut(sorted.filter(n => !isLong(n, asOf)), macro)) out.set(id, reason)
+            for (const n of sorted.filter(x => isLong(x, asOf)).slice(long)) out.set(n.node_id, 'long_full')
+            continue
+        }
         for (const n of sorted.slice(sector)) out.set(n.node_id, 'cap')
         kept.push(...sorted.slice(0, sector))
     }
@@ -107,7 +114,7 @@ export function capOut(nodes, caps) {
 /** A question moved out by the caps, as the dropped list keeps it. Pure. */
 export function capDrop(node, reason, asOf) {
     const layer = layerOf(node)
-    const note = reason === 'story_full' ? `its story (${node.tree}) already has ${PER_TREE} open questions on ${asOf}` : `moved out by the cap of its layer (${layerName(layer)}) on ${asOf}`
+    const note = reason === 'long_full' ? `the ${LONG_CAP} places for long questions were full on ${asOf}` : reason === 'story_full' ? `its story (${node.tree}) already has ${PER_TREE} open questions on ${asOf}` : `moved out by the cap of its layer (${layerName(layer)}) on ${asOf}`
     return { question: node.question, options: node.options.map(o => o.label), reason, note, flagged: true, layer }
 }
 

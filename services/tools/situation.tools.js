@@ -13,6 +13,7 @@
 import { makeToolHandler } from '../agentUtils.js'
 import { latestRun, readRun } from '../situation/store.js'
 import { buildScorecard } from '../situation/scorecard.js'
+import { isLong } from '../situation/horizon.js'
 import { canSeeSituation } from '../situation/access.js'
 import { layerOf, layerName, MACRO } from '../situation/sectors.js'
 
@@ -41,7 +42,7 @@ export function formatSummary(run) {
         far.length ? `INDUSTRY CALLS, FAR — effects that start 6–24 months out (≥ 60%): ${callsIn(far)}` : null,
         warn.length ? `EARLY WARNINGS (a dormant branch woke; shown beside the scores, not in them): ${warn.map(w => `${w.question} → ${w.label} (${pct(w.p)})`).join('; ')}` : null,
         `OPEN QUESTIONS (${live.filter(n => n.kind === 'open').length}):`,
-        ...live.filter(n => n.kind === 'open').map(n => `- ${where(n)}${n.question} — ${opts(n)}`),
+        ...live.filter(n => n.kind === 'open').map(n => `- ${where(n)}${isLong(n, run.run.as_of) ? `[long, by ${n.resolve_by}] ` : ''}${n.question} — ${opts(n)}`),
         `SETTLED (${live.filter(n => n.kind === 'settled').length}): ${live.filter(n => n.kind === 'settled').map(n => `${where(n)}${n.question} — ${opts(n)}`).join('; ') || 'none'}`,
         dec.length ? `THE LAST UPDATE DECIDED: ${dec.map(d => `${d.decision.replace('_', ' ')}: ${d.summary}`).join(' | ')}` : null,
     ].filter(Boolean).join('\n')
@@ -91,7 +92,8 @@ export function formatQuestion(run, name) {
 export function formatScorecard(s) {
     const n = s.nodes.all
     return [
-        `FORWARD TEST since ${s.started_on ?? 'not started'} (${s.verdict.months} months, ${s.runs} runs). The pass rule was declared before the start.`,
+        s.started_on ? `FORWARD TEST since ${s.started_on} (${s.verdict.months} months, ${s.runs} runs). The pass rule was declared before the start.`
+            : `THE FORWARD TEST HAS NOT STARTED. What follows is the trial (${s.runs} runs); none of it counts.`,
         `Questions resolved: ${n.questions} (needs ${100}). Brier ${n.brier?.toFixed(3) ?? 'n/a'} vs equal odds ${n.equal_odds?.toFixed(3) ?? 'n/a'}.`,
         `Industry long − short at 6 months: ${s.industries.m6.n} dates, mean ${s.industries.m6.mean == null ? 'n/a' : pct(s.industries.m6.mean)}, t ${s.industries.m6.t?.toFixed(1) ?? 'n/a'}. The macro layer alone: ${s.macro_only?.m6?.mean == null ? 'n/a' : pct(s.macro_only.m6.mean)}. The plain question (control): ${s.control.m6.mean == null ? 'n/a' : pct(s.control.m6.mean)}.`,
         s.far ? `FAR calls (graded from month 6, beside the test, never in its verdict): to month 12 ${s.far.m12.n} dates, mean ${s.far.m12.mean == null ? 'n/a' : pct(s.far.m12.mean)} (control ${s.far.control.m12.mean == null ? 'n/a' : pct(s.far.control.m12.mean)}); to month 24 ${s.far.m24.n} dates, mean ${s.far.m24.mean == null ? 'n/a' : pct(s.far.m24.mean)} (control ${s.far.control.m24.mean == null ? 'n/a' : pct(s.far.control.m24.mean)}).` : null,

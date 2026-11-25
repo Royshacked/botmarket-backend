@@ -18,6 +18,7 @@ import { recordUsage, calcCost } from '../tokenUsage.service.js'
 import { makePromptLoader } from '../agentUtils.js'
 import { checkNode, newId, SETTLED_AT, realDate } from './model.js'
 import { anchorFor } from './propagate.js'
+import { isLong } from './horizon.js'
 import { layerOf, layerName } from './sectors.js'
 import { logger } from '../logger.service.js'
 
@@ -184,7 +185,9 @@ export function assemble(questions, combined, asOf, { cap = OPEN_CAP, layer = 'm
         if (drops.has(n)) continue
         const q = questions[n - 1]
         const input = {
-            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', confidence: c.confidence, impact: q.impact, layer,
+            node_id: ids.get(n), tree: q.tree, question: q.question, set_by: 'llm', impact: q.impact, layer,
+            // A long question with no base rate is a guess, whatever the runs said of it (horizons §6).
+            confidence: isLong(c, asOf) && !c.base_rate ? 'low' : c.confidence,
             // The drift rule's first baseline: the build's numbers (Roy reviews the open nodes from the first card).
             review: { on: asOf, p: Object.fromEntries(q.options.map((o, i) => [o.key, c.p[i]])) },
             options: q.options.map((o, i) => ({ key: o.key, label: o.label, p: c.p[i], signpost: c.signposts[o.key] ?? NO_SIGNPOST })),

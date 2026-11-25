@@ -1,6 +1,6 @@
 # The situation network: horizons and the cap (2026-11-25)
 
-Status: steps 1–4 (§2–5) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
+Status: steps 1–5 (§2–6) built 2026-11-25; the rest is DESIGN. Parent: [situation-network.md](situation-network.md),
 [situation-network-layers.md](situation-network-layers.md), [situation-network-outcomes.md](situation-network-outcomes.md).
 To land BEFORE the forward test starts: every step changes what is being tested.
 
@@ -73,8 +73,10 @@ Two fields on each effect, in the MAPPING call's schema (the update schema is at
 
 ## 5. Grading (`scorecard.js`, `control.js`)
 
+- **The start:** `SITUATION_TEST_START` (a date, the day of a fresh build). Until it is set the scorecard says the test has
+  not started and shows the trial; only runs and control answers from it count.
 - Near: 3 and 6 months, as declared. **The pass rule (situation-network.md §11.5) is on NEAR, unchanged.**
-- Far: the return from month 6 to month 24, with an early read at month 12 (months 6–12). Reported, never in the
+- Far (each side against the average on its own; there is rarely both): the return from month 6 to month 24, with an early read at month 12 (months 6–12). Reported, never in the
   12-month verdict: the first full far grade comes 24 months in.
 - The control is asked for both windows, so far has its own baseline.
 - Questions: Brier and calibration also split by how far out the question was when set (under 6 months, 6–12, over 12).
@@ -82,8 +84,8 @@ Two fields on each effect, in the MAPPING call's schema (the update schema is at
 
 ## 6. Long questions
 
-- **Up to 8 open long questions** (macro layer), in places of their own: `resolve_by` over 183 days away. When a long
-  question comes within 183 days it competes as a near one.
+- **Up to 8 open long questions** (macro layer), in places of their own: `resolve_by` over 240 days away (183 gave
+  places to May and June questions). When a long question comes within 240 days it competes as a near one.
 - The state prompt asks for 5–8 of them, 6–24 months out (the Fed's path through 2027, hyperscaler capex in 2028, a
   tariff regime that stays or is struck down), each with an answer checkable by a date.
 - **Checkpoints, not bare guesses:** a long question should be linked from at least one near question, so near answers
@@ -102,7 +104,7 @@ re-mapping plus a rebuild to fill the new places. To be measured on dev before p
 2. `starts` / `lasts`, agreement, expiry (§3). Probe the mapping schema live before building on it.
 3. BUILT: near and far scores, the board, Axl's tool (§4).
 4. BUILT: grading and the control (§5).
-5. Long questions (§6).
+5. BUILT: long questions (§6).
 6. Dev: re-map, rebuild, two weekly runs, cost measured. Then prod is aligned again, then the forward test.
 
 After step 1, compare on dev: which calls changed, and whether the Fed, inflation, jobs, oil and trade are all in.
